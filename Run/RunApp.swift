@@ -1,43 +1,44 @@
-//
-//  RunApp.swift
-//  Run
-//
-//  Created by Edward Sanchez on 8/19/26.
-//
-
+import AppKit
 import SwiftUI
-import SwiftData
-import UniformTypeIdentifiers
 
 @main
 struct RunApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
+
     var body: some Scene {
-        DocumentGroup(editing: .itemDocument, migrationPlan: RunMigrationPlan.self) {
-            ContentView()
+        Settings {
+            EmptyView()
         }
     }
 }
 
-extension UTType {
-    static var itemDocument: UTType {
-        UTType(importedAs: "com.example.item-document")
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let store = AppStore()
+    private var statusItemController: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let controller = StatusItemController(store: store)
+        statusItemController = controller
+
+        let arguments = ProcessInfo.processInfo.arguments
+        if let projectFlag = arguments.firstIndex(of: "--open-project"),
+           arguments.indices.contains(projectFlag + 1) {
+            store.openProject(at: URL(fileURLWithPath: arguments[projectFlag + 1]))
+        }
+        if arguments.contains("--show-menu") {
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                controller.showPopover()
+            }
+        }
+        #if DEBUG
+        if arguments.contains("--verification-window") {
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                controller.showVerificationWindow()
+            }
+        }
+        #endif
     }
-}
-
-struct RunMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [VersionedSchema.Type] = [
-        RunVersionedSchema.self,
-    ]
-
-    static var stages: [MigrationStage] = [
-        // Stages of migration between VersionedSchema, if required.
-    ]
-}
-
-struct RunVersionedSchema: VersionedSchema {
-    static var versionIdentifier = Schema.Version(1, 0, 0)
-
-    static var models: [any PersistentModel.Type] = [
-        Item.self,
-    ]
 }

@@ -1,0 +1,86 @@
+import Foundation
+import Testing
+@testable import RunCore
+
+struct XcodeOutputParserTests {
+    @Test func parsesProjectSchemes() throws {
+        let data = Data(#"{"project":{"schemes":["Second","First"]}}"#.utf8)
+        #expect(try XcodeOutputParser.schemes(from: data) == ["Second", "First"])
+    }
+
+    @Test func parsesConcreteAndGenericDestinations() {
+        let output = """
+        Destinations compatible with the "Demo" scheme:
+            { platform:macOS, arch:arm64, id:MAC-ID, name:My Mac }
+            { platform:iOS Simulator, id:SIM-ID, OS:27.0, name:iPhone 18 Pro }
+            { platform:iOS Simulator, name:Any iOS Simulator Device }
+        """
+
+        let destinations = XcodeOutputParser.destinations(from: output)
+        #expect(destinations.count == 3)
+        #expect(destinations[0].isMac)
+        #expect(destinations[1].isSimulator)
+        #expect(destinations[2].isGeneric)
+        #expect(!destinations[2].isRunnable)
+    }
+
+    @Test func bootedSimulatorIsPreferredOverListOrder() {
+        let mac = RunDestination(platform: "macOS", name: "My Mac", identifier: "MAC", isGeneric: false)
+        let simulator = RunDestination(platform: "iOS Simulator", name: "iPhone", identifier: "SIM", isGeneric: false)
+        #expect(XcodeOutputParser.preferredDestination([mac, simulator], bootedSimulatorIDs: ["SIM"]) == simulator)
+    }
+
+    @Test func parsesLaunchableAppBuildSettings() throws {
+        let data = Data(#"[{"buildSettings":{"WRAPPER_EXTENSION":"framework"}},{"buildSettings":{"WRAPPER_EXTENSION":"app","TARGET_BUILD_DIR":"/tmp/Build","FULL_PRODUCT_NAME":"Demo.app","PRODUCT_BUNDLE_IDENTIFIER":"com.example.demo","EXECUTABLE_NAME":"Demo"}}]"#.utf8)
+        let settings = try XcodeOutputParser.appBuildSettings(from: data)
+        #expect(settings.path.path == "/tmp/Build/Demo.app")
+        #expect(settings.bundleIdentifier == "com.example.demo")
+        #expect(settings.executableName == "Demo")
+    }
+
+    @Test func usesXcodeSchemeOrderAsTheInitialScheme() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let projectURL = root.appendingPathComponent("Demo.xcodeproj")
+        let schemesURL = projectURL.appendingPathComponent("xcuserdata/test.xcuserdatad/xcschemes")
+        try FileManager.default.createDirectory(at: schemesURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let propertyList: [String: Any] = [
+            "SchemeUserState": [
+                "Second.xcscheme_^#shared#^_": ["orderHint": 5],
+                "First.xcscheme_^#shared#^_": ["orderHint": 0],
+            ],
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: propertyList, format: .xml, options: 0)
+        try data.write(to: schemesURL.appendingPathComponent("xcschememanagement.plist"))
+        let project = try #require(XcodeProject(url: projectURL))
+
+        #expect(XcodeOutputParser.preferredScheme(in: project, availableSchemes: ["Second", "First"]) == "First")
+    }
+
+    @Test func findsPhysicalDeviceProcessIdentifierInDevicectlOutput() {
+        let data = Data(#"{"result":{"deviceIdentifier":"DEVICE","process":{"processIdentifier":8675}}}"#.utf8)
+        #expect(XcodeOutputParser.deviceProcessIdentifier(from: data) == 8675)
+    }
+
+    @Test func discoversAFileBackedSchemeImmediately() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let projectURL = root.appendingPathComponent("Demo.xcodeproj")
+        let schemesURL = projectURL.appendingPathComponent("xcshareddata/xcschemes")
+        try FileManager.default.createDirectory(at: schemesURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: schemesURL.appendingPathComponent("Demo.xcscheme"))
+        let project = try #require(XcodeProject(url: projectURL))
+
+        #expect(XcodeOutputParser.localSchemes(in: project) == ["Demo"])
+        #expect(XcodeOutputParser.preferredScheme(in: project, availableSchemes: ["Demo"]) == "Demo")
+    }
+
+    @Test func filtersPackageSchemesWhenProjectSchemesAreKnown() {
+        let discovered = ["ChatKit", "ChatKitModels", "Rio", "Rio Scroll Test"]
+        let local = ["Rio", "Rio Scroll Test"]
+
+        #expect(XcodeOutputParser.userSchemes(discovered: discovered, local: local) == local)
+        #expect(XcodeOutputParser.userSchemes(discovered: discovered, local: []) == discovered)
+    }
+}
