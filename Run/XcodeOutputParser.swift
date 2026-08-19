@@ -2,18 +2,23 @@ import Foundation
 
 enum XcodeOutputParser {
     static func localSchemes(in project: XcodeProject) -> [String] {
+        localSchemeDescriptors(in: project).map(\.name)
+    }
+
+    static func localSchemeDescriptors(in project: XcodeProject) -> [SchemeDescriptor] {
         guard let enumerator = FileManager.default.enumerator(
             at: project.url,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
-        var names: Set<String> = []
+        var descriptors: [String: SchemeDescriptor] = [:]
         for case let fileURL as URL in enumerator
         where fileURL.pathExtension == "xcscheme" && fileURL.path.contains("/xcschemes/") {
-            names.insert(fileURL.deletingPathExtension().lastPathComponent)
+            let name = fileURL.deletingPathExtension().lastPathComponent
+            descriptors[name] = schemeDescriptor(name: name, fileURL: fileURL)
         }
-        return names.sorted()
+        return descriptors.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     static func userSchemes(discovered: [String], local: [String]) -> [String] {
@@ -53,14 +58,34 @@ enum XcodeOutputParser {
             guard let platform = fields["platform"], let name = fields["name"] else { return nil }
             let identifier = fields["id"].flatMap { $0 == "dvtdevice-DVTiPhonePlaceholder-iphoneos:placeholder" ? nil : $0 }
             let error = fields["error"]
-            let generic = identifier == nil || name.hasPrefix("Any ") || error != nil
+            let generic = identifier == nil || identifier?.localizedCaseInsensitiveContains("placeholder") == true || name.hasPrefix("Any ")
             return RunDestination(
                 platform: platform,
                 name: name,
                 identifier: identifier,
-                isGeneric: generic
+                isGeneric: generic,
+                osVersion: fields["OS"],
+                availabilityError: error
             )
         }
+    }
+
+    static func destinationGroups(from destinations: [RunDestination]) -> [RunDestinationGroup] {
+        let macs = destinations.filter { $0.isMac && $0.isRunnable }
+        let unavailable = destinations.filter { $0.availabilityError != nil }
+        let buildOnly = destinations.filter { $0.isGeneric && $0.availabilityError == nil }
+        let physical = destinations.filter { !$0.isMac && !$0.isSimulator && $0.isRunnable }
+        let simulators = destinations.filter { $0.isSimulator && $0.isRunnable }
+
+        var groups: [RunDestinationGroup] = []
+        appendGroup(destinations: macs, singular: "Mac", plural: "Macs", to: &groups)
+        appendPlatformGroups(destinations: physical, deviceType: "Device", to: &groups)
+        appendGroup(destinations: unavailable, singular: "Unavailable Device", plural: "Unavailable Devices", to: &groups)
+        if !buildOnly.isEmpty {
+            groups.append(RunDestinationGroup(name: "Build", destinations: buildOnly))
+        }
+        appendPlatformGroups(destinations: simulators, deviceType: "Simulator", to: &groups)
+        return groups
     }
 
     static func appBuildSettings(from data: Data) throws -> (path: URL, bundleIdentifier: String, executableName: String) {
@@ -136,5 +161,82 @@ enum XcodeOutputParser {
             }
         }
         return nil
+    }
+
+    private static func schemeDescriptor(name: String, fileURL: URL) -> SchemeDescriptor {
+        guard let source = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return SchemeDescriptor(name: name, productName: nil, productKind: .other)
+        }
+        let referencePattern = #"<BuildableReference\b[^>]*>"#
+        let references = matches(pattern: referencePattern, in: source)
+        let preferred = references.first { attribute("BlueprintName", in: $0) == name } ?? references.first
+        let productName = preferred.flatMap { attribute("BuildableName", in: $0) }
+        return SchemeDescriptor(
+            name: name,
+            productName: productName,
+            productKind: productKind(for: productName)
+        )
+    }
+
+    private static func matches(pattern: String, in source: String) -> [String] {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return expression.matches(in: source, range: range).compactMap { match in
+            Range(match.range, in: source).map { String(source[$0]) }
+        }
+    }
+
+    private static func attribute(_ name: String, in source: String) -> String? {
+        let escapedName = NSRegularExpression.escapedPattern(for: name)
+        guard let value = matches(pattern: escapedName + #"\s*=\s*"([^"]*)""#, in: source).first,
+              let firstQuote = value.firstIndex(of: "\"") else { return nil }
+        let remainder = value[value.index(after: firstQuote)...]
+        guard let lastQuote = remainder.lastIndex(of: "\"") else { return nil }
+        return String(remainder[..<lastQuote])
+    }
+
+    private static func productKind(for productName: String?) -> SchemeProductKind {
+        guard let productName else { return .other }
+        switch URL(fileURLWithPath: productName).pathExtension.lowercased() {
+        case "app": return .app
+        case "appex": return .appExtension
+        case "xctest": return .test
+        case "framework", "xcframework": return .framework
+        case "a", "dylib": return .library
+        case "": return .commandLineTool
+        default: return .other
+        }
+    }
+
+    private static func appendGroup(
+        destinations: [RunDestination],
+        singular: String,
+        plural: String,
+        to groups: inout [RunDestinationGroup]
+    ) {
+        guard !destinations.isEmpty else { return }
+        groups.append(RunDestinationGroup(
+            name: destinations.count == 1 ? singular : plural,
+            destinations: destinations
+        ))
+    }
+
+    private static func appendPlatformGroups(
+        destinations: [RunDestination],
+        deviceType: String,
+        to groups: inout [RunDestinationGroup]
+    ) {
+        let grouped = Dictionary(grouping: destinations, by: { destination in
+            destination.platform.replacingOccurrences(of: " Simulator", with: "")
+        })
+        for platform in grouped.keys.sorted() {
+            let values = grouped[platform, default: []]
+            appendGroup(
+                destinations: values,
+                singular: "\(platform) \(deviceType)",
+                plural: "\(platform) \(deviceType)s",
+                to: &groups
+            )
+        }
     }
 }

@@ -29,6 +29,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
+        popover.contentSize = NSSize(width: 380, height: 240)
         popover.contentViewController = NSHostingController(rootView: MenuBarPopoverView(store: store))
         updateRunItem()
 
@@ -47,7 +48,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     #if DEBUG
     func showVerificationWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 250),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -85,7 +86,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
-private struct MenuBarPopoverView: View {
+struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
     @State private var showsClearConfirmation = false
 
@@ -97,41 +98,12 @@ private struct MenuBarPopoverView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
+                    .padding(.top, 13)
+                    .padding(.bottom, 9)
 
-                popupRow(title: "Scheme") {
-                    Picker("Scheme", selection: schemeSelection) {
-                        if store.schemes.isEmpty {
-                            Text(store.isLoadingSchemes ? "Finding Schemes…" : "No Schemes")
-                                .tag(String?.none)
-                        } else {
-                            ForEach(store.schemes, id: \.self) { scheme in
-                                Text(scheme).tag(String?.some(scheme))
-                            }
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .disabled(store.schemes.isEmpty || store.phase.isActive || store.isLoadingSchemes)
-                }
-
-                popupRow(title: "Run Destination") {
-                    Picker("Run Destination", selection: destinationSelection) {
-                        if runnableDestinations.isEmpty {
-                            Text(store.isLoadingDestinations ? "Finding Destinations…" : "No Destinations")
-                                .tag(RunDestination?.none)
-                        } else {
-                            ForEach(runnableDestinations) { destination in
-                                Text(destinationTitle(destination))
-                                    .tag(RunDestination?.some(destination))
-                            }
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .disabled(runnableDestinations.isEmpty || store.phase.isActive)
-                }
+                configurationMenus
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
 
                 if case .failed(let message) = store.phase {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -139,47 +111,30 @@ private struct MenuBarPopoverView: View {
                         .foregroundStyle(.red)
                         .lineLimit(3)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
+                        .padding(.bottom, 10)
                 }
 
                 Divider()
-                    .padding(.vertical, 6)
             }
 
-            menuButton("Open…", shortcut: "⌘O") {
+            MenuActionRow(title: "Open…", shortcut: "⌘O") {
                 store.chooseProject()
             }
 
             if store.recentProjects.isEmpty {
-                menuRow("No Recents")
-                    .foregroundStyle(.tertiary)
+                MenuActionRow(title: "No Recents", isEnabled: false) { }
             } else {
-                Menu {
-                    ForEach(store.recentProjects) { project in
-                        Button(project.name) {
-                            store.openProject(at: project.url)
-                        }
-                    }
-                    Divider()
-                    Button("Clear", role: .destructive) {
-                        showsClearConfirmation = true
-                    }
-                } label: {
-                    menuRow("Recents", trailing: "chevron.right")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                recentsMenu
             }
 
             Divider()
-                .padding(.vertical, 6)
 
-            menuButton("Quit", shortcut: "⌘Q") {
+            MenuActionRow(title: "Quit", shortcut: "⌘Q") {
                 NSApplication.shared.terminate(nil)
             }
         }
-        .padding(.bottom, 8)
-        .frame(width: 360)
+        .padding(.vertical, 7)
+        .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
         .alert("Clear Recents?", isPresented: $showsClearConfirmation) {
             Button("Clear", role: .destructive) {
@@ -189,6 +144,104 @@ private struct MenuBarPopoverView: View {
         } message: {
             Text("This removes all projects from the Recents menu.")
         }
+    }
+
+    private var configurationMenus: some View {
+        HStack(spacing: 0) {
+            schemeMenu
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 3)
+                .accessibilityHidden(true)
+
+            destinationMenu
+        }
+        .padding(3)
+        .background(.quaternary.opacity(0.72), in: .rect(cornerRadius: 7))
+    }
+
+    private var schemeMenu: some View {
+        Menu {
+            Picker("Scheme", selection: schemeSelection) {
+                ForEach(store.schemeDescriptors) { scheme in
+                    Label(scheme.name, systemImage: scheme.symbolName)
+                        .tag(String?.some(scheme.name))
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.inline)
+        } label: {
+            PathSegmentLabel(
+                title: store.selectedScheme ?? loadingSchemeTitle,
+                symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape"
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(store.schemes.isEmpty || store.phase.isActive)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("Scheme")
+        .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
+    }
+
+    private var destinationMenu: some View {
+        Menu {
+            Picker("Run Destination", selection: destinationSelection) {
+                ForEach(store.destinationGroups) { group in
+                    Section(group.name) {
+                        ForEach(group.destinations) { destination in
+                            Label(destinationMenuTitle(destination), systemImage: destination.symbolName)
+                                .tag(RunDestination?.some(destination))
+                                .disabled(!destination.isRunnable)
+                        }
+                    }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.inline)
+        } label: {
+            PathSegmentLabel(
+                title: store.selectedDestination?.name ?? loadingDestinationTitle,
+                symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer"
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(store.destinations.isEmpty || store.phase.isActive)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("Run Destination")
+        .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
+    }
+
+    private var recentsMenu: some View {
+        Menu {
+            ForEach(store.recentProjects) { project in
+                Button {
+                    store.openProject(at: project.url)
+                } label: {
+                    Label(project.name, systemImage: "hammer")
+                }
+            }
+            Divider()
+            Button("Clear…", role: .destructive) {
+                showsClearConfirmation = true
+            }
+        } label: {
+            HStack {
+                Text("Recents")
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .padding(.horizontal, 5)
     }
 
     private var schemeSelection: Binding<String?> {
@@ -213,58 +266,72 @@ private struct MenuBarPopoverView: View {
         )
     }
 
-    private var runnableDestinations: [RunDestination] {
-        store.destinations.filter(\.isRunnable)
-    }
-
-    private func destinationTitle(_ destination: RunDestination) -> String {
-        let hasDuplicateName = runnableDestinations.filter { $0.name == destination.name }.count > 1
-        return hasDuplicateName ? "\(destination.name) — \(destination.platform)" : destination.name
-    }
-
-    private func popupRow<Content: View>(
-        title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .frame(width: 125, alignment: .leading)
-            content()
-                .frame(maxWidth: .infinity)
+    private func destinationMenuTitle(_ destination: RunDestination) -> String {
+        guard destination.isSimulator, let osVersion = destination.osVersion else {
+            return destination.name
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
+        return "\(destination.name) — \(osVersion)"
     }
 
-    private func menuButton(
-        _ title: String,
-        shortcut: String,
-        action: @escaping () -> Void
-    ) -> some View {
+    private var loadingSchemeTitle: String {
+        store.isLoadingSchemes ? "Finding Schemes…" : "No Scheme"
+    }
+
+    private var loadingDestinationTitle: String {
+        store.isLoadingDestinations ? "Finding Destinations…" : "No Destination"
+    }
+}
+
+private struct PathSegmentLabel: View {
+    let title: String
+    let symbolName: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbolName)
+                .font(.system(size: 13))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.blue)
+            Text(title)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 2)
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 29)
+        .contentShape(.rect)
+    }
+}
+
+private struct MenuActionRow: View {
+    let title: String
+    var shortcut: String?
+    var isEnabled = true
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
         Button(action: action) {
             HStack {
                 Text(title)
                 Spacer()
-                Text(shortcut)
-                    .foregroundStyle(.tertiary)
+                if let shortcut {
+                    Text(shortcut)
+                        .foregroundStyle(isHovered ? Color.white.opacity(0.8) : Color.secondary)
+                }
             }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
             .contentShape(.rect)
+            .foregroundStyle(isEnabled ? (isHovered ? Color.white : Color.primary) : Color.secondary)
+            .background(isHovered && isEnabled ? Color.accentColor : .clear, in: .rect(cornerRadius: 5))
+            .padding(.horizontal, 5)
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-    }
-
-    private func menuRow(_ title: String, trailing systemImage: String? = nil) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            if let systemImage {
-                Image(systemName: systemImage)
-            }
-        }
-        .contentShape(.rect)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .disabled(!isEnabled)
+        .onHover { isHovered = $0 }
     }
 }

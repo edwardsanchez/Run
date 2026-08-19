@@ -69,10 +69,22 @@ struct XcodeOutputParserTests {
         let schemesURL = projectURL.appendingPathComponent("xcshareddata/xcschemes")
         try FileManager.default.createDirectory(at: schemesURL, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        try Data().write(to: schemesURL.appendingPathComponent("Demo.xcscheme"))
+        let schemeXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Scheme version="1.7">
+          <BuildAction>
+            <BuildableReference BuildableName="Demo.app" BlueprintName="Demo"></BuildableReference>
+          </BuildAction>
+        </Scheme>
+        """
+        try Data(schemeXML.utf8).write(to: schemesURL.appendingPathComponent("Demo.xcscheme"))
         let project = try #require(XcodeProject(url: projectURL))
 
         #expect(XcodeOutputParser.localSchemes(in: project) == ["Demo"])
+        let descriptor = try #require(XcodeOutputParser.localSchemeDescriptors(in: project).first)
+        #expect(descriptor.productName == "Demo.app")
+        #expect(descriptor.productKind == .app)
+        #expect(descriptor.symbolName == "app")
         #expect(XcodeOutputParser.preferredScheme(in: project, availableSchemes: ["Demo"]) == "Demo")
     }
 
@@ -82,5 +94,21 @@ struct XcodeOutputParserTests {
 
         #expect(XcodeOutputParser.userSchemes(discovered: discovered, local: local) == local)
         #expect(XcodeOutputParser.userSchemes(discovered: discovered, local: []) == discovered)
+    }
+
+    @Test func groupsDestinationsInXcodeOrder() {
+        let destinations = [
+            RunDestination(platform: "iOS Simulator", name: "iPhone 17", identifier: "SIM", isGeneric: false, osVersion: "27.0"),
+            RunDestination(platform: "iOS", name: "Lorax", identifier: "PHONE", isGeneric: false),
+            RunDestination(platform: "macOS", name: "My Mac", identifier: "MAC", isGeneric: false),
+            RunDestination(platform: "iOS", name: "Unavailable", identifier: "OLD", isGeneric: false, availabilityError: "Unsupported"),
+            RunDestination(platform: "iOS", name: "Any iOS Device", identifier: nil, isGeneric: true),
+        ]
+
+        let groups = XcodeOutputParser.destinationGroups(from: destinations)
+        #expect(groups.map(\.name) == [
+            "Mac", "iOS Device", "Unavailable Device", "Build", "iOS Simulator",
+        ])
+        #expect(groups.last?.destinations.first?.osVersion == "27.0")
     }
 }

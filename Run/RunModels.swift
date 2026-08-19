@@ -35,12 +35,79 @@ struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
     let name: String
     let identifier: String?
     let isGeneric: Bool
+    let osVersion: String?
+    let availabilityError: String?
+
+    init(
+        platform: String,
+        name: String,
+        identifier: String?,
+        isGeneric: Bool,
+        osVersion: String? = nil,
+        availabilityError: String? = nil
+    ) {
+        self.platform = platform
+        self.name = name
+        self.identifier = identifier
+        self.isGeneric = isGeneric
+        self.osVersion = osVersion
+        self.availabilityError = availabilityError
+    }
 
     var id: String { identifier ?? "\(platform)|\(name)" }
     var isSimulator: Bool { platform.localizedCaseInsensitiveContains("simulator") }
     var isMac: Bool { platform == "macOS" }
-    var isRunnable: Bool { !isGeneric && identifier != nil }
+    var isRunnable: Bool { !isGeneric && identifier != nil && availabilityError == nil }
     var commandSpecifier: String { identifier.map { "id=\($0)" } ?? "platform=\(platform),name=\(name)" }
+
+    var symbolName: String {
+        let combined = "\(platform) \(name)".lowercased()
+        if isMac { return "macbook" }
+        if combined.contains("vision") { return "visionpro" }
+        if combined.contains("watch") { return "applewatch" }
+        if combined.contains("tv") { return "appletv" }
+        if combined.contains("ipad") { return "ipad" }
+        if combined.contains("iphone") || platform == "iOS" || isSimulator { return "iphone" }
+        return "desktopcomputer"
+    }
+}
+
+enum SchemeProductKind: String, Codable, Sendable {
+    case app
+    case appExtension
+    case test
+    case framework
+    case library
+    case commandLineTool
+    case other
+
+    var symbolName: String {
+        switch self {
+        case .app: "app"
+        case .appExtension: "puzzlepiece.extension"
+        case .test: "checkmark.diamond"
+        case .framework: "shippingbox"
+        case .library: "books.vertical"
+        case .commandLineTool: "terminal"
+        case .other: "gearshape"
+        }
+    }
+}
+
+struct SchemeDescriptor: Equatable, Hashable, Identifiable, Sendable {
+    let name: String
+    let productName: String?
+    let productKind: SchemeProductKind
+
+    var id: String { name }
+    var symbolName: String { productKind.symbolName }
+}
+
+struct RunDestinationGroup: Equatable, Identifiable, Sendable {
+    let name: String
+    let destinations: [RunDestination]
+
+    var id: String { name }
 }
 
 enum RunPhase: Equatable, Sendable {

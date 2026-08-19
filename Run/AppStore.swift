@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 final class AppStore {
     private(set) var project: XcodeProject?
     private(set) var schemes: [String] = []
+    private(set) var schemeDescriptors: [SchemeDescriptor] = []
     private(set) var destinations: [RunDestination] = []
     private(set) var recentProjects: [XcodeProject]
     private(set) var phase: RunPhase = .idle
@@ -46,6 +47,15 @@ final class AppStore {
         project != nil && selectedScheme != nil && selectedDestination?.isRunnable == true && !phase.isActive
     }
 
+    var selectedSchemeDescriptor: SchemeDescriptor? {
+        guard let selectedScheme else { return nil }
+        return schemeDescriptors.first { $0.name == selectedScheme }
+    }
+
+    var destinationGroups: [RunDestinationGroup] {
+        XcodeOutputParser.destinationGroups(from: destinations)
+    }
+
     var menuContent: MenuContent {
         MenuContent(
             projectName: project?.name,
@@ -82,8 +92,10 @@ final class AppStore {
         operation?.cancel()
         client.cancelActiveCommand()
         self.project = project
-        let localSchemes = XcodeOutputParser.localSchemes(in: project)
+        let localSchemeDescriptors = XcodeOutputParser.localSchemeDescriptors(in: project)
+        let localSchemes = localSchemeDescriptors.map(\.name)
         schemes = localSchemes
+        schemeDescriptors = localSchemeDescriptors
         destinations = []
         selectedScheme = savedScheme.flatMap { localSchemes.contains($0) ? $0 : nil }
             ?? (localSchemes.count == 1 ? localSchemes[0] : nil)
@@ -104,6 +116,13 @@ final class AppStore {
                     local: localSchemes
                 )
                 schemes = discoveredSchemes
+                let localDescriptorsByName = Dictionary(
+                    uniqueKeysWithValues: localSchemeDescriptors.map { ($0.name, $0) }
+                )
+                schemeDescriptors = discoveredSchemes.map { name in
+                    localDescriptorsByName[name]
+                        ?? SchemeDescriptor(name: name, productName: nil, productKind: .other)
+                }
                 if let savedScheme, discoveredSchemes.contains(savedScheme) {
                     selectedScheme = savedScheme
                 } else if discoveredSchemes.count == 1 {
