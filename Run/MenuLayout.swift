@@ -35,4 +35,26 @@ enum MenuLayout {
     static func isBottomItem<ID: Equatable>(_ id: ID, lastID: ID?) -> Bool {
         id == lastID
     }
+
+    static func runControlPresentation(
+        phase: RunPhase,
+        isHovered: Bool,
+        canRevealBuildStop: Bool
+    ) -> RunControlPresentation {
+        switch phase {
+        case .building:
+            isHovered && canRevealBuildStop ? .stopBuilding : .building
+        case .running, .stopping:
+            .stop
+        default:
+            .run
+        }
+    }
+}
+
+enum RunControlPresentation: Equatable {
+    case run
+    case building
+    case stopBuilding
+    case stop
 }

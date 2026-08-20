@@ -28,4 +28,37 @@ struct MenuLayoutTests {
         #expect(MenuLayout.destinationPickerListHeight(groupCount: 2, itemCount: 3) == 150)
         #expect(MenuLayout.destinationPickerListHeight(groupCount: 10, itemCount: 100) == 500)
     }
+
+    @Test func runControlShowsBuildProgressUntilStopIsDeliberatelyRevealed() {
+        #expect(MenuLayout.runControlPresentation(
+            phase: .building,
+            isHovered: false,
+            canRevealBuildStop: false
+        ) == .building)
+        #expect(MenuLayout.runControlPresentation(
+            phase: .building,
+            isHovered: true,
+            canRevealBuildStop: false
+        ) == .building)
+        #expect(MenuLayout.runControlPresentation(
+            phase: .building,
+            isHovered: true,
+            canRevealBuildStop: true
+        ) == .stopBuilding)
+        #expect(MenuLayout.runControlPresentation(
+            phase: .building,
+            isHovered: false,
+            canRevealBuildStop: true
+        ) == .building)
+        #expect(MenuLayout.runControlPresentation(
+            phase: .running,
+            isHovered: false,
+            canRevealBuildStop: false
+        ) == .stop)
+        #expect(MenuLayout.runControlPresentation(
+            phase: .idle,
+            isHovered: true,
+            canRevealBuildStop: true
+        ) == .run)
+    }
 }

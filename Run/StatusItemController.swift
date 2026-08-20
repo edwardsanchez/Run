@@ -7,6 +7,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let nameItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let runItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let popover = NSPopover()
+    private let buildProgressIndicator = NSProgressIndicator()
+    private var runItemTrackingArea: NSTrackingArea?
+    private var isRunItemHovered = false
+    private var canRevealBuildStop = false
+    private var renderedRunPhase: RunPhase?
     #if DEBUG
     private var verificationWindow: NSWindow?
     #endif
@@ -25,6 +30,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         runItem.button?.target = self
         runItem.button?.action = #selector(toggleRun)
         runItem.button?.sendAction(on: [.leftMouseUp])
+        configureRunItemTracking()
+        configureBuildProgressIndicator()
 
         popover.behavior = .transient
         popover.animates = false
@@ -65,14 +72,74 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     #endif
 
     private func updateRunItem() {
-        let isActive = store.phase.isActive
-        runItem.button?.image = NSImage(
-            systemSymbolName: isActive ? "stop.fill" : "play.fill",
-            accessibilityDescription: isActive ? "Stop" : "Run"
+        if store.phase == .building, renderedRunPhase != .building {
+            canRevealBuildStop = !isRunItemHovered
+        } else if store.phase != .building {
+            canRevealBuildStop = false
+        }
+
+        let presentation = MenuLayout.runControlPresentation(
+            phase: store.phase,
+            isHovered: isRunItemHovered,
+            canRevealBuildStop: canRevealBuildStop
         )
-        runItem.button?.toolTip = isActive ? "Stop" : "Run"
+        let isActive = store.phase.isActive
+        let label: String
+        switch presentation {
+        case .run:
+            label = "Run"
+            setRunItemImage(symbolName: "play.fill", accessibilityDescription: label)
+        case .building:
+            label = "Building…"
+            runItem.button?.image = nil
+            buildProgressIndicator.startAnimation(nil)
+        case .stopBuilding:
+            label = "Stop Building"
+            setRunItemImage(symbolName: "stop.fill", accessibilityDescription: label)
+        case .stop:
+            label = "Stop"
+            setRunItemImage(symbolName: "stop.fill", accessibilityDescription: label)
+        }
+        runItem.button?.toolTip = label
+        runItem.button?.setAccessibilityLabel(label)
         runItem.button?.isEnabled = isActive || store.canRun
         runItem.button?.appearsDisabled = !(isActive || store.canRun)
+        renderedRunPhase = store.phase
+    }
+
+    private func setRunItemImage(symbolName: String, accessibilityDescription: String) {
+        buildProgressIndicator.stopAnimation(nil)
+        runItem.button?.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: accessibilityDescription
+        )
+    }
+
+    private func configureBuildProgressIndicator() {
+        guard let button = runItem.button else { return }
+        buildProgressIndicator.style = .spinning
+        buildProgressIndicator.controlSize = .small
+        buildProgressIndicator.isDisplayedWhenStopped = false
+        buildProgressIndicator.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(buildProgressIndicator)
+        NSLayoutConstraint.activate([
+            buildProgressIndicator.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            buildProgressIndicator.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            buildProgressIndicator.widthAnchor.constraint(equalToConstant: 14),
+            buildProgressIndicator.heightAnchor.constraint(equalToConstant: 14),
+        ])
+    }
+
+    private func configureRunItemTracking() {
+        guard let button = runItem.button else { return }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        button.addTrackingArea(trackingArea)
+        runItemTrackingArea = trackingArea
     }
 
     private func updateNameItem() {
@@ -91,6 +158,19 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     @objc private func toggleRun() {
         store.toggleRun()
+    }
+
+    @objc private func mouseEntered(with event: NSEvent) {
+        isRunItemHovered = true
+        updateRunItem()
+    }
+
+    @objc private func mouseExited(with event: NSEvent) {
+        isRunItemHovered = false
+        if store.phase == .building {
+            canRevealBuildStop = true
+        }
+        updateRunItem()
     }
 }
 
