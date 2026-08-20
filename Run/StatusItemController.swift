@@ -31,9 +31,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         popover.contentSize = NSSize(width: 380, height: 240)
         popover.contentViewController = NSHostingController(rootView: MenuBarPopoverView(store: store))
+        updateNameItem()
         updateRunItem()
 
         store.onChange = { [weak self] in
+            self?.updateNameItem()
             self?.updateRunItem()
         }
     }
@@ -73,6 +75,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         runItem.button?.appearsDisabled = !(isActive || store.canRun)
     }
 
+    private func updateNameItem() {
+        let title = store.selectedScheme ?? "Run"
+        nameItem.button?.title = title
+        nameItem.button?.toolTip = title
+    }
+
     @objc private func togglePopover() {
         if popover.isShown {
             popover.performClose(nil)
@@ -88,6 +96,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
 struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
+    @State private var showsSchemePicker = false
     @State private var showsDestinationPicker = false
     @State private var showsRecents = false
 
@@ -147,7 +156,7 @@ struct MenuBarPopoverView: View {
 
     private var configurationMenus: some View {
         HStack(spacing: 0) {
-            schemeMenu
+            schemePickerButton
 
             Image(systemName: "chevron.right")
                 .font(.caption2.weight(.semibold))
@@ -161,28 +170,23 @@ struct MenuBarPopoverView: View {
         .background(.quaternary.opacity(0.72), in: .rect(cornerRadius: 7))
     }
 
-    private var schemeMenu: some View {
-        Menu {
-            Picker("Scheme", selection: schemeSelection) {
-                ForEach(store.schemeDescriptors) { scheme in
-                    Label(scheme.name, systemImage: scheme.symbolName)
-                        .tag(String?.some(scheme.name))
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.inline)
+    private var schemePickerButton: some View {
+        Button {
+            showsSchemePicker.toggle()
         } label: {
             PathSegmentLabel(
                 title: store.selectedScheme ?? loadingSchemeTitle,
                 symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape"
             )
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .disabled(store.schemes.isEmpty || store.phase.isActive)
         .frame(maxWidth: .infinity)
         .accessibilityLabel("Scheme")
         .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
+        .popover(isPresented: $showsSchemePicker, arrowEdge: .top) {
+            SchemePickerPopover(store: store, isPresented: $showsSchemePicker)
+        }
     }
 
     private var destinationPickerButton: some View {
@@ -204,17 +208,6 @@ struct MenuBarPopoverView: View {
         }
     }
 
-    private var schemeSelection: Binding<String?> {
-        Binding(
-            get: { store.selectedScheme },
-            set: { scheme in
-                if let scheme {
-                    store.selectScheme(scheme)
-                }
-            }
-        )
-    }
-
     private var loadingSchemeTitle: String {
         store.isLoadingSchemes ? "Finding Schemes…" : "No Scheme"
     }
@@ -224,50 +217,174 @@ struct MenuBarPopoverView: View {
     }
 }
 
+private struct SchemePickerPopover: View {
+    @Bindable var store: AppStore
+    @Binding var isPresented: Bool
+    @State private var query = ""
+    @State private var highlightedName: String?
+    @FocusState private var isFilterFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HighLevelFilterField(
+                text: $query,
+                isFocused: $isFilterFocused,
+                handleKey: handleKeyPress
+            )
+
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredSchemes) { scheme in
+                            PickerSelectionRow(
+                                title: scheme.name,
+                                symbolName: scheme.symbolName,
+                                version: nil,
+                                connectionSymbol: nil,
+                                isSelected: scheme.name == store.selectedScheme,
+                                isHighlighted: scheme.name == highlightedName,
+                                isEnabled: true
+                            ) {
+                                chooseScheme(scheme)
+                            }
+                            .id(scheme.name)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(maxHeight: 360)
+                .onChange(of: highlightedName) { _, name in
+                    if let name {
+                        proxy.scrollTo(name, anchor: .center)
+                    }
+                }
+            }
+        }
+        .frame(width: 320)
+        .onAppear {
+            highlightedName = store.selectedScheme ?? filteredSchemes.first?.name
+            Task {
+                await Task.yield()
+                isFilterFocused = true
+            }
+        }
+        .onChange(of: query) { _, _ in
+            reconcileHighlight()
+        }
+    }
+
+    private var filteredSchemes: [SchemeDescriptor] {
+        guard !query.isEmpty else { return store.schemeDescriptors }
+        return store.schemeDescriptors.filter { $0.name.localizedStandardContains(query) }
+    }
+
+    private func handleKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
+        switch key {
+        case .upArrow:
+            moveHighlight(by: -1)
+        case .downArrow:
+            moveHighlight(by: 1)
+        case .return:
+            if let highlightedName {
+                store.selectScheme(highlightedName)
+                isPresented = false
+            }
+        default:
+            return .ignored
+        }
+        return .handled
+    }
+
+    private func moveHighlight(by offset: Int) {
+        let schemes = filteredSchemes
+        guard !schemes.isEmpty else { return }
+        let current = schemes.firstIndex { $0.name == highlightedName }
+            ?? (offset > 0 ? -1 : schemes.count)
+        let next = min(max(current + offset, 0), schemes.count - 1)
+        highlightedName = schemes[next].name
+    }
+
+    private func reconcileHighlight() {
+        if filteredSchemes.contains(where: { $0.name == highlightedName }) { return }
+        highlightedName = filteredSchemes.first { $0.name == store.selectedScheme }?.name
+            ?? filteredSchemes.first?.name
+    }
+
+    private func chooseScheme(_ scheme: SchemeDescriptor) {
+        store.selectScheme(scheme.name)
+        isPresented = false
+    }
+}
+
 private struct RunDestinationPickerPopover: View {
     @Bindable var store: AppStore
     @Binding var isPresented: Bool
     @State private var query = ""
+    @State private var highlightedID: String?
+    @FocusState private var isFilterFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Filter", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .padding(12)
+            HighLevelFilterField(
+                text: $query,
+                isFocused: $isFilterFocused,
+                handleKey: handleKeyPress
+            )
 
             Divider()
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(filteredGroups) { group in
-                        Text(group.name)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 14)
-                            .padding(.top, 10)
-                            .padding(.bottom, 3)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(filteredGroups) { group in
+                            Text(group.name)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 14)
+                                .padding(.top, 10)
+                                .padding(.bottom, 3)
 
-                        ForEach(group.destinations) { destination in
-                            DestinationSelectionRow(
-                                title: displayTitle(for: destination),
-                                symbolName: destination.symbolName,
-                                version: destination.osVersion,
-                                connectionSymbol: destination.connectionKind?.symbolName,
-                                isSelected: destination == store.selectedDestination,
-                                isEnabled: destination.isRunnable
-                            ) {
-                                store.selectDestination(destination)
-                                isPresented = false
+                            ForEach(group.destinations) { destination in
+                                PickerSelectionRow(
+                                    title: displayTitle(for: destination),
+                                    symbolName: destination.symbolName,
+                                    version: destination.osVersion,
+                                    connectionSymbol: destination.connectionKind?.symbolName,
+                                    isSelected: destination == store.selectedDestination,
+                                    isHighlighted: destination.id == highlightedID,
+                                    isEnabled: destination.isRunnable
+                                ) {
+                                    store.selectDestination(destination)
+                                    isPresented = false
+                                }
+                                .id(destination.id)
+                                .help(destination.availabilityError ?? destination.name)
                             }
-                            .help(destination.availabilityError ?? destination.name)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
+                .frame(maxHeight: 500)
+                .onChange(of: highlightedID) { _, identifier in
+                    if let identifier {
+                        proxy.scrollTo(identifier, anchor: .center)
+                    }
+                }
             }
-            .frame(maxHeight: 500)
         }
         .frame(width: 430)
+        .onAppear {
+            highlightedID = store.selectedDestination?.id ?? selectableDestinations.first?.id
+            Task {
+                await Task.yield()
+                isFilterFocused = true
+            }
+        }
+        .onChange(of: query) { _, _ in
+            reconcileHighlight()
+        }
     }
 
     private var filteredGroups: [RunDestinationGroup] {
@@ -289,14 +406,51 @@ private struct RunDestinationPickerPopover: View {
         }
         return "\(destination.name) (\(identifier))"
     }
+
+    private var selectableDestinations: [RunDestination] {
+        filteredGroups.flatMap(\.destinations).filter(\.isRunnable)
+    }
+
+    private func handleKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
+        switch key {
+        case .upArrow:
+            moveHighlight(by: -1)
+        case .downArrow:
+            moveHighlight(by: 1)
+        case .return:
+            if let destination = selectableDestinations.first(where: { $0.id == highlightedID }) {
+                store.selectDestination(destination)
+                isPresented = false
+            }
+        default:
+            return .ignored
+        }
+        return .handled
+    }
+
+    private func moveHighlight(by offset: Int) {
+        let destinations = selectableDestinations
+        guard !destinations.isEmpty else { return }
+        let current = destinations.firstIndex { $0.id == highlightedID }
+            ?? (offset > 0 ? -1 : destinations.count)
+        let next = min(max(current + offset, 0), destinations.count - 1)
+        highlightedID = destinations[next].id
+    }
+
+    private func reconcileHighlight() {
+        if selectableDestinations.contains(where: { $0.id == highlightedID }) { return }
+        highlightedID = selectableDestinations.first { $0.id == store.selectedDestination?.id }?.id
+            ?? selectableDestinations.first?.id
+    }
 }
 
-private struct DestinationSelectionRow: View {
+private struct PickerSelectionRow: View {
     let title: String
     let symbolName: String
     let version: String?
     let connectionSymbol: String?
     let isSelected: Bool
+    var isHighlighted = false
     let isEnabled: Bool
     let action: () -> Void
     @State private var isHovered = false
@@ -330,7 +484,7 @@ private struct DestinationSelectionRow: View {
 
                 if let version {
                     Text(version)
-                        .foregroundStyle(isHovered ? Color.white.opacity(0.8) : Color.secondary)
+                        .foregroundStyle(isActive ? Color.white.opacity(0.8) : Color.secondary)
                         .frame(minWidth: 36, alignment: .trailing)
                 }
             }
@@ -338,7 +492,7 @@ private struct DestinationSelectionRow: View {
             .frame(height: 30)
             .contentShape(.rect)
             .foregroundStyle(rowForeground)
-            .background(isHovered && isEnabled ? Color.accentColor : .clear, in: .rect(cornerRadius: 5))
+            .background(isActive && isEnabled ? Color.accentColor : .clear, in: .rect(cornerRadius: 5))
             .padding(.horizontal, 5)
         }
         .buttonStyle(.plain)
@@ -349,7 +503,34 @@ private struct DestinationSelectionRow: View {
 
     private var rowForeground: Color {
         if !isEnabled { return .secondary }
-        return isHovered ? .white : .primary
+        return isActive ? .white : .primary
+    }
+
+    private var isActive: Bool { isHovered || isHighlighted }
+}
+
+private struct HighLevelFilterField: View {
+    @Binding var text: String
+    @FocusState.Binding var isFocused: Bool
+    let handleKey: (KeyEquivalent) -> KeyPress.Result
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .foregroundStyle(.secondary)
+
+            TextField("Filter", text: $text)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .focusEffectDisabled()
+                .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
+                    handleKey(press.key)
+                }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(Color.primary.opacity(0.075), in: Capsule())
+        .padding(12)
     }
 }
 

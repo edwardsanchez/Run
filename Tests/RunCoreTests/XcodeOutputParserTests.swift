@@ -107,14 +107,39 @@ struct XcodeOutputParserTests {
 
         let groups = XcodeOutputParser.runningDestinationGroups(
             from: destinations,
-            recentDestinationIDs: ["PHONE"]
+            recentDestinationIDs: [destinations[1].id]
         )
         #expect(groups.map(\.name) == [
             "Recent", "Devices", "Simulators", "Incompatible",
         ])
-        #expect(groups[0].destinations.map(\.id) == ["PHONE"])
-        #expect(groups[1].destinations.map(\.id) == ["MAC"])
+        #expect(groups[0].destinations.map(\.id) == [destinations[1].id])
+        #expect(groups[1].destinations.map(\.id) == [destinations[2].id])
         #expect(groups[2].destinations.first?.osVersion == "27.0")
         #expect(groups.flatMap(\.destinations).contains { $0.isGeneric } == false)
+
+        let compatibleOnly = destinations.filter { $0.availabilityError == nil }
+        let compatibleGroups = XcodeOutputParser.runningDestinationGroups(
+            from: compatibleOnly,
+            recentDestinationIDs: []
+        )
+        #expect(!compatibleGroups.map(\.name).contains("Incompatible"))
+    }
+
+    @Test func destinationIdentityDistinguishesCompatibleAndIncompatibleVariants() {
+        let available = RunDestination(
+            platform: "macOS",
+            name: "My Mac",
+            identifier: "MAC",
+            isGeneric: false
+        )
+        let incompatible = RunDestination(
+            platform: "iOS",
+            name: "My Mac",
+            identifier: "MAC",
+            isGeneric: false,
+            availabilityError: "Unsupported"
+        )
+
+        #expect(available.id != incompatible.id)
     }
 }

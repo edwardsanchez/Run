@@ -57,7 +57,10 @@ struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.connectionKind = connectionKind
     }
 
-    var id: String { identifier ?? "\(platform)|\(name)" }
+    var id: String {
+        [identifier ?? "generic", platform, name, availabilityError ?? "available"]
+            .joined(separator: "|")
+    }
     var isSimulator: Bool { platform.localizedCaseInsensitiveContains("simulator") }
     var isMac: Bool { platform == "macOS" }
     var isRunnable: Bool { !isGeneric && identifier != nil && availabilityError == nil }
