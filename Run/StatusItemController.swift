@@ -88,7 +88,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
 struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
-    @State private var showsClearConfirmation = false
+    @State private var showsDestinationPicker = false
+    @State private var showsRecents = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -117,33 +118,31 @@ struct MenuBarPopoverView: View {
                 Divider()
             }
 
-            MenuActionRow(title: "Open…", shortcut: "⌘O") {
+            MenuActionRow(title: "Open…") {
                 store.chooseProject()
             }
 
             if store.recentProjects.isEmpty {
                 MenuActionRow(title: "No Recents", isEnabled: false) { }
             } else {
-                recentsMenu
+                MenuActionRow(title: "Recents", trailingSymbol: "chevron.right") {
+                    showsRecents.toggle()
+                }
+                .popover(isPresented: $showsRecents, arrowEdge: .top) {
+                    RecentsPickerPopover(store: store, isPresented: $showsRecents)
+                }
             }
 
             Divider()
+                .padding(.vertical, 4)
 
-            MenuActionRow(title: "Quit", shortcut: "⌘Q") {
+            MenuActionRow(title: "Quit") {
                 NSApplication.shared.terminate(nil)
             }
         }
         .padding(.vertical, 7)
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
-        .alert("Clear Recents?", isPresented: $showsClearConfirmation) {
-            Button("Clear", role: .destructive) {
-                store.clearRecents()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This removes all projects from the Recents menu.")
-        }
     }
 
     private var configurationMenus: some View {
@@ -156,7 +155,7 @@ struct MenuBarPopoverView: View {
                 .padding(.horizontal, 3)
                 .accessibilityHidden(true)
 
-            destinationMenu
+            destinationPickerButton
         }
         .padding(3)
         .background(.quaternary.opacity(0.72), in: .rect(cornerRadius: 7))
@@ -186,62 +185,23 @@ struct MenuBarPopoverView: View {
         .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
     }
 
-    private var destinationMenu: some View {
-        Menu {
-            Picker("Run Destination", selection: destinationSelection) {
-                ForEach(store.destinationGroups) { group in
-                    Section(group.name) {
-                        ForEach(group.destinations) { destination in
-                            Label(destinationMenuTitle(destination), systemImage: destination.symbolName)
-                                .tag(RunDestination?.some(destination))
-                                .disabled(!destination.isRunnable)
-                        }
-                    }
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.inline)
+    private var destinationPickerButton: some View {
+        Button {
+            showsDestinationPicker.toggle()
         } label: {
             PathSegmentLabel(
                 title: store.selectedDestination?.name ?? loadingDestinationTitle,
                 symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer"
             )
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .disabled(store.destinations.isEmpty || store.phase.isActive)
         .frame(maxWidth: .infinity)
         .accessibilityLabel("Run Destination")
         .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
-    }
-
-    private var recentsMenu: some View {
-        Menu {
-            ForEach(store.recentProjects) { project in
-                Button {
-                    store.openProject(at: project.url)
-                } label: {
-                    Label(project.name, systemImage: "hammer")
-                }
-            }
-            Divider()
-            Button("Clear…", role: .destructive) {
-                showsClearConfirmation = true
-            }
-        } label: {
-            HStack {
-                Text("Recents")
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .contentShape(.rect)
+        .popover(isPresented: $showsDestinationPicker, arrowEdge: .top) {
+            RunDestinationPickerPopover(store: store, isPresented: $showsDestinationPicker)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .padding(.horizontal, 5)
     }
 
     private var schemeSelection: Binding<String?> {
@@ -255,30 +215,182 @@ struct MenuBarPopoverView: View {
         )
     }
 
-    private var destinationSelection: Binding<RunDestination?> {
-        Binding(
-            get: { store.selectedDestination },
-            set: { destination in
-                if let destination {
-                    store.selectDestination(destination)
-                }
-            }
-        )
-    }
-
-    private func destinationMenuTitle(_ destination: RunDestination) -> String {
-        guard destination.isSimulator, let osVersion = destination.osVersion else {
-            return destination.name
-        }
-        return "\(destination.name) — \(osVersion)"
-    }
-
     private var loadingSchemeTitle: String {
         store.isLoadingSchemes ? "Finding Schemes…" : "No Scheme"
     }
 
     private var loadingDestinationTitle: String {
         store.isLoadingDestinations ? "Finding Destinations…" : "No Destination"
+    }
+}
+
+private struct RunDestinationPickerPopover: View {
+    @Bindable var store: AppStore
+    @Binding var isPresented: Bool
+    @State private var query = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField("Filter", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .padding(12)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(filteredGroups) { group in
+                        Text(group.name)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 14)
+                            .padding(.top, 10)
+                            .padding(.bottom, 3)
+
+                        ForEach(group.destinations) { destination in
+                            DestinationSelectionRow(
+                                title: displayTitle(for: destination),
+                                symbolName: destination.symbolName,
+                                version: destination.osVersion,
+                                connectionSymbol: destination.connectionKind?.symbolName,
+                                isSelected: destination == store.selectedDestination,
+                                isEnabled: destination.isRunnable
+                            ) {
+                                store.selectDestination(destination)
+                                isPresented = false
+                            }
+                            .help(destination.availabilityError ?? destination.name)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .frame(maxHeight: 500)
+        }
+        .frame(width: 430)
+    }
+
+    private var filteredGroups: [RunDestinationGroup] {
+        guard !query.isEmpty else { return store.destinationGroups }
+        return store.destinationGroups.compactMap { group in
+            let destinations = group.destinations.filter { destination in
+                destination.name.localizedStandardContains(query)
+                    || destination.platform.localizedStandardContains(query)
+                    || destination.osVersion?.localizedStandardContains(query) == true
+            }
+            return destinations.isEmpty ? nil : RunDestinationGroup(name: group.name, destinations: destinations)
+        }
+    }
+
+    private func displayTitle(for destination: RunDestination) -> String {
+        let duplicates = store.destinations.filter { $0.name == destination.name }
+        guard duplicates.count > 1, let identifier = destination.identifier else {
+            return destination.name
+        }
+        return "\(destination.name) (\(identifier))"
+    }
+}
+
+private struct DestinationSelectionRow: View {
+    let title: String
+    let symbolName: String
+    let version: String?
+    let connectionSymbol: String?
+    let isSelected: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 0) {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.semibold))
+                    .opacity(isSelected ? 1 : 0)
+                    .frame(width: 12)
+
+                Image(systemName: symbolName)
+                    .font(.system(size: 13))
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: 16, height: 16)
+                    .padding(.leading, 2)
+
+                Text(title)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.leading, 6)
+
+                if let connectionSymbol {
+                    Image(systemName: connectionSymbol)
+                        .font(.system(size: 12))
+                        .padding(.leading, 6)
+                }
+
+                Spacer(minLength: 10)
+
+                if let version {
+                    Text(version)
+                        .foregroundStyle(isHovered ? Color.white.opacity(0.8) : Color.secondary)
+                        .frame(minWidth: 36, alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .contentShape(.rect)
+            .foregroundStyle(rowForeground)
+            .background(isHovered && isEnabled ? Color.accentColor : .clear, in: .rect(cornerRadius: 5))
+            .padding(.horizontal, 5)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onHover { isHovered = $0 }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var rowForeground: Color {
+        if !isEnabled { return .secondary }
+        return isHovered ? .white : .primary
+    }
+}
+
+private struct RecentsPickerPopover: View {
+    @Bindable var store: AppStore
+    @Binding var isPresented: Bool
+    @State private var showsClearConfirmation = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(store.recentProjects) { project in
+                MenuActionRow(title: project.name, trailingSymbol: "hammer") {
+                    store.openProject(at: project.url)
+                    isPresented = false
+                }
+                .help(project.url.path)
+            }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            Button("Clear Recents…", role: .destructive) {
+                showsClearConfirmation = true
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.red)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+        }
+        .padding(.top, 6)
+        .frame(width: 280)
+        .alert("Clear Recents?", isPresented: $showsClearConfirmation) {
+            Button("Clear", role: .destructive) {
+                store.clearRecents()
+                isPresented = false
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes all projects from the Recents menu.")
+        }
     }
 }
 
@@ -308,7 +420,7 @@ private struct PathSegmentLabel: View {
 
 private struct MenuActionRow: View {
     let title: String
-    var shortcut: String?
+    var trailingSymbol: String?
     var isEnabled = true
     let action: () -> Void
     @State private var isHovered = false
@@ -318,9 +430,9 @@ private struct MenuActionRow: View {
             HStack {
                 Text(title)
                 Spacer()
-                if let shortcut {
-                    Text(shortcut)
-                        .foregroundStyle(isHovered ? Color.white.opacity(0.8) : Color.secondary)
+                if let trailingSymbol {
+                    Image(systemName: trailingSymbol)
+                        .font(.caption.weight(.semibold))
                 }
             }
             .padding(.horizontal, 10)

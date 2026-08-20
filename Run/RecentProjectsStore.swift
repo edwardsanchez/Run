@@ -43,4 +43,26 @@ final class SelectionStore {
         defaults.set(scheme, forKey: "scheme.\(project.id)")
         defaults.set(destinationID, forKey: "destination.\(project.id)")
     }
+
+    func recentDestinationIDs(for project: XcodeProject, scheme: String) -> [String] {
+        defaults.stringArray(forKey: recentDestinationsKey(for: project, scheme: scheme)) ?? []
+    }
+
+    func rememberDestination(
+        _ destinationID: String,
+        for project: XcodeProject,
+        scheme: String,
+        limit: Int = 5
+    ) -> [String] {
+        var identifiers = recentDestinationIDs(for: project, scheme: scheme)
+        identifiers.removeAll { $0 == destinationID }
+        identifiers.insert(destinationID, at: 0)
+        identifiers = Array(identifiers.prefix(limit))
+        defaults.set(identifiers, forKey: recentDestinationsKey(for: project, scheme: scheme))
+        return identifiers
+    }
+
+    private func recentDestinationsKey(for project: XcodeProject, scheme: String) -> String {
+        "recentDestinations.\(project.id).\(scheme)"
+    }
 }

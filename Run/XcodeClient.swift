@@ -54,7 +54,21 @@ final class XcodeClient {
         let result = try await xcodebuild(["-showdestinations", "-scheme", scheme] + containerArguments(for: project))
         let destinations = XcodeOutputParser.destinations(from: result.combinedOutput)
         guard !destinations.isEmpty else { throw RunError.noDestinations }
-        return destinations
+        let metadataByIdentifier = await deviceMetadataByIdentifier()
+        return destinations.map { destination in
+            if destination.isMac, destination.osVersion == nil {
+                return destination.addingMetadata(
+                    osVersion: hostOperatingSystemVersion,
+                    connectionKind: .local
+                )
+            }
+            guard let identifier = destination.identifier,
+                  let metadata = metadataByIdentifier[identifier] else { return destination }
+            return destination.addingMetadata(
+                osVersion: metadata.osVersion,
+                connectionKind: metadata.connectionKind
+            )
+        }
     }
 
     func buildAndLaunch(project: XcodeProject, scheme: String, destination: RunDestination) async throws -> LaunchContext {
@@ -135,6 +149,53 @@ final class XcodeClient {
         return Set(runtimes.values.flatMap { devices in
             devices.compactMap { $0["udid"] as? String }
         })
+    }
+
+    private func deviceMetadataByIdentifier() async -> [String: DeviceMetadata] {
+        guard let result = try? await developerCommand(
+            "devicectl",
+            arguments: ["list", "devices", "--json-output", "-"]
+        ),
+        let object = try? JSONSerialization.jsonObject(with: result.standardOutput),
+        let root = object as? [String: Any],
+        let resultObject = root["result"] as? [String: Any],
+        let devices = resultObject["devices"] as? [[String: Any]]
+        else { return [:] }
+
+        return devices.reduce(into: [String: DeviceMetadata]()) { metadata, device in
+            let properties = device["properties"] as? [String: Any]
+            let hardware = properties?["hardware"] as? [String: Any]
+            let software = properties?["software"] as? [String: Any]
+            let connection = properties?["connection"] as? [String: Any]
+            let legacyHardware = device["hardwareProperties"] as? [String: Any]
+            let legacyDevice = device["deviceProperties"] as? [String: Any]
+            let legacyConnection = device["connectionProperties"] as? [String: Any]
+
+            guard let identifier = (hardware?["udid"] ?? legacyHardware?["udid"]) as? String else { return }
+            let versionObject = software?["osVersionNumber"] as? [String: Any]
+            let osVersion = (versionObject?["stringValue"] as? String)
+                ?? (legacyDevice?["osVersionNumber"] as? String)
+            let transport = (connection?["transportType"] as? String)
+                ?? (legacyConnection?["transportType"] as? String)
+            metadata[identifier] = DeviceMetadata(
+                osVersion: osVersion,
+                connectionKind: connectionKind(for: transport)
+            )
+        }
+    }
+
+    private func connectionKind(for transport: String?) -> DestinationConnectionKind? {
+        switch transport?.lowercased() {
+        case "localnetwork", "network", "wifi", "wireless": .wireless
+        case "cloud": .cloud
+        case .some: .local
+        case nil: nil
+        }
+    }
+
+    private var hostOperatingSystemVersion: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(version.majorVersion).\(version.minorVersion)"
     }
 
     private func xcodebuild(_ arguments: [String]) async throws -> CommandResult {
@@ -223,6 +284,11 @@ final class XcodeClient {
         }
         return result
     }
+}
+
+private struct DeviceMetadata {
+    let osVersion: String?
+    let connectionKind: DestinationConnectionKind?
 }
 
 private struct CommandResult {

@@ -37,6 +37,7 @@ struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
     let isGeneric: Bool
     let osVersion: String?
     let availabilityError: String?
+    let connectionKind: DestinationConnectionKind?
 
     init(
         platform: String,
@@ -44,7 +45,8 @@ struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
         identifier: String?,
         isGeneric: Bool,
         osVersion: String? = nil,
-        availabilityError: String? = nil
+        availabilityError: String? = nil,
+        connectionKind: DestinationConnectionKind? = nil
     ) {
         self.platform = platform
         self.name = name
@@ -52,6 +54,7 @@ struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
         self.isGeneric = isGeneric
         self.osVersion = osVersion
         self.availabilityError = availabilityError
+        self.connectionKind = connectionKind
     }
 
     var id: String { identifier ?? "\(platform)|\(name)" }
@@ -69,6 +72,32 @@ struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
         if combined.contains("ipad") { return "ipad" }
         if combined.contains("iphone") || platform == "iOS" || isSimulator { return "iphone" }
         return "desktopcomputer"
+    }
+
+    func addingMetadata(osVersion: String?, connectionKind: DestinationConnectionKind?) -> RunDestination {
+        RunDestination(
+            platform: platform,
+            name: name,
+            identifier: identifier,
+            isGeneric: isGeneric,
+            osVersion: self.osVersion ?? osVersion,
+            availabilityError: availabilityError,
+            connectionKind: connectionKind
+        )
+    }
+}
+
+enum DestinationConnectionKind: String, Codable, Sendable {
+    case local
+    case wireless
+    case cloud
+
+    var symbolName: String? {
+        switch self {
+        case .local: nil
+        case .wireless: "network"
+        case .cloud: "cloud"
+        }
     }
 }
 

@@ -70,21 +70,24 @@ enum XcodeOutputParser {
         }
     }
 
-    static func destinationGroups(from destinations: [RunDestination]) -> [RunDestinationGroup] {
-        let macs = destinations.filter { $0.isMac && $0.isRunnable }
+    static func runningDestinationGroups(
+        from destinations: [RunDestination],
+        recentDestinationIDs: [String]
+    ) -> [RunDestinationGroup] {
+        let recent = recentDestinationIDs.compactMap { identifier in
+            destinations.first { $0.id == identifier && $0.isRunnable }
+        }
+        let recentSet = Set(recent.map(\.id))
+        let runnable = destinations.filter { $0.isRunnable && !recentSet.contains($0.id) }
+        let devices = runnable.filter { !$0.isSimulator }
+        let simulators = runnable.filter(\.isSimulator)
         let unavailable = destinations.filter { $0.availabilityError != nil }
-        let buildOnly = destinations.filter { $0.isGeneric && $0.availabilityError == nil }
-        let physical = destinations.filter { !$0.isMac && !$0.isSimulator && $0.isRunnable }
-        let simulators = destinations.filter { $0.isSimulator && $0.isRunnable }
 
         var groups: [RunDestinationGroup] = []
-        appendGroup(destinations: macs, singular: "Mac", plural: "Macs", to: &groups)
-        appendPlatformGroups(destinations: physical, deviceType: "Device", to: &groups)
-        appendGroup(destinations: unavailable, singular: "Unavailable Device", plural: "Unavailable Devices", to: &groups)
-        if !buildOnly.isEmpty {
-            groups.append(RunDestinationGroup(name: "Build", destinations: buildOnly))
-        }
-        appendPlatformGroups(destinations: simulators, deviceType: "Simulator", to: &groups)
+        if !recent.isEmpty { groups.append(RunDestinationGroup(name: "Recent", destinations: recent)) }
+        if !devices.isEmpty { groups.append(RunDestinationGroup(name: "Devices", destinations: devices)) }
+        if !simulators.isEmpty { groups.append(RunDestinationGroup(name: "Simulators", destinations: simulators)) }
+        if !unavailable.isEmpty { groups.append(RunDestinationGroup(name: "Incompatible", destinations: unavailable)) }
         return groups
     }
 
@@ -208,35 +211,4 @@ enum XcodeOutputParser {
         }
     }
 
-    private static func appendGroup(
-        destinations: [RunDestination],
-        singular: String,
-        plural: String,
-        to groups: inout [RunDestinationGroup]
-    ) {
-        guard !destinations.isEmpty else { return }
-        groups.append(RunDestinationGroup(
-            name: destinations.count == 1 ? singular : plural,
-            destinations: destinations
-        ))
-    }
-
-    private static func appendPlatformGroups(
-        destinations: [RunDestination],
-        deviceType: String,
-        to groups: inout [RunDestinationGroup]
-    ) {
-        let grouped = Dictionary(grouping: destinations, by: { destination in
-            destination.platform.replacingOccurrences(of: " Simulator", with: "")
-        })
-        for platform in grouped.keys.sorted() {
-            let values = grouped[platform, default: []]
-            appendGroup(
-                destinations: values,
-                singular: "\(platform) \(deviceType)",
-                plural: "\(platform) \(deviceType)s",
-                to: &groups
-            )
-        }
-    }
 }

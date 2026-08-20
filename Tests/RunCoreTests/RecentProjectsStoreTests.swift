@@ -53,4 +53,19 @@ struct RecentProjectsStoreTests {
         #expect(store.scheme(for: project) == "Demo")
         #expect(store.destinationID(for: project) == "SIM-ID")
     }
+
+    @Test func remembersRecentDestinationsPerSchemeInMostRecentOrder() throws {
+        let suite = "RunDestinationRecents.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SelectionStore(defaults: defaults)
+        let project = try #require(XcodeProject(url: URL(fileURLWithPath: "/tmp/Demo.xcodeproj")))
+
+        _ = store.rememberDestination("PHONE", for: project, scheme: "Demo")
+        _ = store.rememberDestination("SIM", for: project, scheme: "Demo")
+        _ = store.rememberDestination("PHONE", for: project, scheme: "Demo")
+
+        #expect(store.recentDestinationIDs(for: project, scheme: "Demo") == ["PHONE", "SIM"])
+        #expect(store.recentDestinationIDs(for: project, scheme: "Other").isEmpty)
+    }
 }

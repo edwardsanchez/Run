@@ -96,7 +96,7 @@ struct XcodeOutputParserTests {
         #expect(XcodeOutputParser.userSchemes(discovered: discovered, local: []) == discovered)
     }
 
-    @Test func groupsDestinationsInXcodeOrder() {
+    @Test func groupsRunnableDestinationsWithRecentsFirstAndNoBuildGroup() {
         let destinations = [
             RunDestination(platform: "iOS Simulator", name: "iPhone 17", identifier: "SIM", isGeneric: false, osVersion: "27.0"),
             RunDestination(platform: "iOS", name: "Lorax", identifier: "PHONE", isGeneric: false),
@@ -105,10 +105,16 @@ struct XcodeOutputParserTests {
             RunDestination(platform: "iOS", name: "Any iOS Device", identifier: nil, isGeneric: true),
         ]
 
-        let groups = XcodeOutputParser.destinationGroups(from: destinations)
+        let groups = XcodeOutputParser.runningDestinationGroups(
+            from: destinations,
+            recentDestinationIDs: ["PHONE"]
+        )
         #expect(groups.map(\.name) == [
-            "Mac", "iOS Device", "Unavailable Device", "Build", "iOS Simulator",
+            "Recent", "Devices", "Simulators", "Incompatible",
         ])
-        #expect(groups.last?.destinations.first?.osVersion == "27.0")
+        #expect(groups[0].destinations.map(\.id) == ["PHONE"])
+        #expect(groups[1].destinations.map(\.id) == ["MAC"])
+        #expect(groups[2].destinations.first?.osVersion == "27.0")
+        #expect(groups.flatMap(\.destinations).contains { $0.isGeneric } == false)
     }
 }

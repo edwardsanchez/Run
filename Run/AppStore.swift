@@ -16,6 +16,7 @@ final class AppStore {
     private(set) var selectedDestination: RunDestination?
     private(set) var isLoadingSchemes = false
     private(set) var isLoadingDestinations = false
+    private(set) var recentDestinationIDs: [String] = []
 
     @ObservationIgnored var onChange: (() -> Void)?
     private let client: XcodeClient
@@ -53,7 +54,10 @@ final class AppStore {
     }
 
     var destinationGroups: [RunDestinationGroup] {
-        XcodeOutputParser.destinationGroups(from: destinations)
+        XcodeOutputParser.runningDestinationGroups(
+            from: destinations,
+            recentDestinationIDs: recentDestinationIDs
+        )
     }
 
     var menuContent: MenuContent {
@@ -100,6 +104,9 @@ final class AppStore {
         selectedScheme = savedScheme.flatMap { localSchemes.contains($0) ? $0 : nil }
             ?? (localSchemes.count == 1 ? localSchemes[0] : nil)
         selectedDestination = nil
+        recentDestinationIDs = selectedScheme.map {
+            selectionStore.recentDestinationIDs(for: project, scheme: $0)
+        } ?? []
         isLoadingSchemes = true
         isLoadingDestinations = true
         addRecent(project)
@@ -134,6 +141,9 @@ final class AppStore {
                     )
                 }
                 isLoadingSchemes = false
+                recentDestinationIDs = selectedScheme.map {
+                    selectionStore.recentDestinationIDs(for: project, scheme: $0)
+                } ?? []
                 notifyChange()
 
                 guard let selectedScheme else { throw RunError.noSchemes }
@@ -148,6 +158,9 @@ final class AppStore {
                     savedDestinationID: savedDestinationID
                 )
                 isLoadingDestinations = false
+                if savedDestinationID != nil, let selectedDestination {
+                    rememberDestination(selectedDestination)
+                }
                 persistSelection()
                 notifyChange()
             } catch {
@@ -169,6 +182,9 @@ final class AppStore {
         guard schemes.contains(scheme), selectedScheme != scheme else { return }
         selectedScheme = scheme
         selectedDestination = nil
+        recentDestinationIDs = project.map {
+            selectionStore.recentDestinationIDs(for: $0, scheme: scheme)
+        } ?? []
         persistSelection()
         notifyChange()
         refreshDestinations()
@@ -177,6 +193,7 @@ final class AppStore {
     func selectDestination(_ destination: RunDestination) {
         guard destinations.contains(destination), destination.isRunnable else { return }
         selectedDestination = destination
+        rememberDestination(destination)
         persistSelection()
         notifyChange()
     }
@@ -270,6 +287,15 @@ final class AppStore {
     private func persistSelection() {
         guard let project else { return }
         selectionStore.save(scheme: selectedScheme, destinationID: selectedDestination?.id, for: project)
+    }
+
+    private func rememberDestination(_ destination: RunDestination) {
+        guard let project, let selectedScheme else { return }
+        recentDestinationIDs = selectionStore.rememberDestination(
+            destination.id,
+            for: project,
+            scheme: selectedScheme
+        )
     }
 
     private func setPhase(_ phase: RunPhase) {
