@@ -163,6 +163,82 @@ struct LaunchContext: Equatable, Sendable {
     let executableName: String
     let destination: RunDestination
     let deviceProcessIdentifier: Int?
+    let postActions: [PreparedSchemeExecutionAction]
+}
+
+struct SchemeExecutionAction: Equatable, Sendable {
+    let title: String
+    let script: String
+    let targetName: String?
+}
+
+struct PreparedSchemeExecutionAction: Equatable, Sendable {
+    let action: SchemeExecutionAction
+    let environment: [String: String]
+    let workingDirectory: URL?
+}
+
+struct SchemeRunConfiguration: Equatable, Sendable {
+    let runnableKind: SchemeRunnableKind
+    let launchStyle: String
+    let buildConfiguration: String
+    let executableTargetName: String?
+    let executableProductName: String?
+    let argumentEntries: [String]
+    let environment: [String: String]
+    let workingDirectory: String?
+    let preActions: [SchemeExecutionAction]
+    let postActions: [SchemeExecutionAction]
+    let enablesAddressSanitizer: Bool
+    let enablesThreadSanitizer: Bool
+    let enablesUndefinedBehaviorSanitizer: Bool
+
+    static let fallback = SchemeRunConfiguration(
+        runnableKind: .generated,
+        launchStyle: "0",
+        buildConfiguration: "Debug",
+        executableTargetName: nil,
+        executableProductName: nil,
+        argumentEntries: [],
+        environment: [:],
+        workingDirectory: nil,
+        preActions: [],
+        postActions: [],
+        enablesAddressSanitizer: false,
+        enablesThreadSanitizer: false,
+        enablesUndefinedBehaviorSanitizer: false
+    )
+}
+
+enum SchemeRunnableKind: Equatable, Sendable {
+    case generated
+    case buildableProduct
+    case unsupported(String)
+}
+
+struct AppBuildSettings: Equatable, Sendable {
+    let path: URL
+    let bundleIdentifier: String
+    let executableName: String
+    let targetName: String?
+    let values: [String: String]
+}
+
+struct TargetBuildSettings: Equatable, Sendable {
+    let targetName: String?
+    let values: [String: String]
+}
+
+struct ResolvedSchemeRunConfiguration: Equatable, Sendable {
+    let buildConfiguration: String
+    let arguments: [String]
+    let environment: [String: String]
+    let workingDirectory: URL?
+    let preActions: [SchemeExecutionAction]
+    let postActions: [SchemeExecutionAction]
+    let enablesAddressSanitizer: Bool
+    let enablesThreadSanitizer: Bool
+    let enablesUndefinedBehaviorSanitizer: Bool
 }
 
 struct ProjectConfiguration: Equatable, Sendable {
@@ -179,6 +255,8 @@ enum RunError: LocalizedError, Equatable {
     case noRunnableDestination
     case commandFailed(String)
     case appProductNotFound
+    case invalidScheme(String)
+    case unsupportedRunAction(String)
 
     var errorDescription: String? {
         switch self {
@@ -188,6 +266,8 @@ enum RunError: LocalizedError, Equatable {
         case .noRunnableDestination: "Choose a concrete device, Simulator, or Mac destination."
         case .commandFailed(let message): message
         case .appProductNotFound: "The selected scheme did not produce an app that Run can launch."
+        case .invalidScheme(let name): "The \(name) scheme's Run action could not be read."
+        case .unsupportedRunAction(let detail): "This scheme's Run action is not supported yet: \(detail)."
         }
     }
 }

@@ -113,7 +113,7 @@ final class AppStore {
         setPhase(.idle)
 
         operation = Task {
-            await client.stop(previousLaunchContext)
+            try? await client.stop(previousLaunchContext)
             guard !Task.isCancelled else { return }
             do {
                 let allDiscoveredSchemes = try await client.schemes(for: project)
@@ -223,7 +223,7 @@ final class AppStore {
                     destination: selectedDestination
                 )
                 guard !Task.isCancelled else {
-                    await client.stop(context)
+                    try? await client.stop(context)
                     return
                 }
                 launchContext = context
@@ -243,8 +243,12 @@ final class AppStore {
         let context = launchContext
         launchContext = nil
         operation = Task {
-            await client.stop(context)
-            setPhase(.idle)
+            do {
+                try await client.stop(context)
+                setPhase(.idle)
+            } catch {
+                setPhase(.failed(error.localizedDescription))
+            }
         }
     }
 

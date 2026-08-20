@@ -124,10 +124,9 @@ struct MenuBarPopoverView: View {
                         .padding(.bottom, 10)
                 }
 
-                Divider()
             }
 
-            MenuActionRow(title: "Open…") {
+            ProjectOpenRow(showsDivider: store.project != nil) {
                 store.chooseProject()
             }
 
@@ -143,9 +142,9 @@ struct MenuBarPopoverView: View {
             }
 
             Divider()
-                .padding(.vertical, 4)
+                .padding(.vertical, MenuLayout.standardSeparatorSpacing)
 
-            MenuActionRow(title: "Quit") {
+            MenuActionRow(title: "Quit", usesConcentricBottomCorners: true) {
                 NSApplication.shared.terminate(nil)
             }
         }
@@ -217,6 +216,22 @@ struct MenuBarPopoverView: View {
     }
 }
 
+private struct ProjectOpenRow: View {
+    let showsDivider: Bool
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if showsDivider {
+                Divider()
+                    .padding(.bottom, MenuLayout.projectOpenSeparatorSpacing)
+            }
+
+            MenuActionRow(title: "Open…", action: action)
+        }
+    }
+}
+
 private struct SchemePickerPopover: View {
     @Bindable var store: AppStore
     @Binding var isPresented: Bool
@@ -245,7 +260,11 @@ private struct SchemePickerPopover: View {
                                 connectionSymbol: nil,
                                 isSelected: scheme.name == store.selectedScheme,
                                 isHighlighted: scheme.name == highlightedName,
-                                isEnabled: true
+                                isEnabled: true,
+                                usesConcentricBottomCorners: MenuLayout.isBottomItem(
+                                    scheme.id,
+                                    lastID: filteredSchemes.last?.id
+                                )
                             ) {
                                 chooseScheme(scheme)
                             }
@@ -254,7 +273,7 @@ private struct SchemePickerPopover: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 360)
+                .frame(height: MenuLayout.schemePickerListHeight(itemCount: filteredSchemes.count))
                 .onChange(of: highlightedName) { _, name in
                     if let name {
                         proxy.scrollTo(name, anchor: .center)
@@ -343,8 +362,11 @@ private struct RunDestinationPickerPopover: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 14)
-                                .padding(.top, 10)
                                 .padding(.bottom, 3)
+                                .frame(
+                                    height: MenuLayout.destinationGroupHeaderHeight,
+                                    alignment: .bottomLeading
+                                )
 
                             ForEach(group.destinations) { destination in
                                 PickerSelectionRow(
@@ -354,7 +376,11 @@ private struct RunDestinationPickerPopover: View {
                                     connectionSymbol: destination.connectionKind?.symbolName,
                                     isSelected: destination == store.selectedDestination,
                                     isHighlighted: destination.id == highlightedID,
-                                    isEnabled: destination.isRunnable
+                                    isEnabled: destination.isRunnable,
+                                    usesConcentricBottomCorners: MenuLayout.isBottomItem(
+                                        destination.id,
+                                        lastID: filteredGroups.last?.destinations.last?.id
+                                    )
                                 ) {
                                     store.selectDestination(destination)
                                     isPresented = false
@@ -366,7 +392,12 @@ private struct RunDestinationPickerPopover: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 500)
+                .frame(
+                    height: MenuLayout.destinationPickerListHeight(
+                        groupCount: filteredGroups.count,
+                        itemCount: filteredGroups.reduce(0) { $0 + $1.destinations.count }
+                    )
+                )
                 .onChange(of: highlightedID) { _, identifier in
                     if let identifier {
                         proxy.scrollTo(identifier, anchor: .center)
@@ -452,6 +483,7 @@ private struct PickerSelectionRow: View {
     let isSelected: Bool
     var isHighlighted = false
     let isEnabled: Bool
+    var usesConcentricBottomCorners = false
     let action: () -> Void
     @State private var isHovered = false
 
@@ -489,10 +521,12 @@ private struct PickerSelectionRow: View {
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: 30)
+            .frame(height: MenuLayout.menuItemHeight)
             .contentShape(.rect)
             .foregroundStyle(rowForeground)
-            .background(isActive && isEnabled ? Color.accentColor : .clear, in: .rect(cornerRadius: 5))
+            .background {
+                rowBackground
+            }
             .padding(.horizontal, 5)
         }
         .buttonStyle(.plain)
@@ -507,6 +541,24 @@ private struct PickerSelectionRow: View {
     }
 
     private var isActive: Bool { isHovered || isHighlighted }
+
+    @ViewBuilder
+    private var rowBackground: some View {
+        let color = isActive && isEnabled ? Color.accentColor : Color.clear
+        if usesConcentricBottomCorners {
+            ConcentricRectangle(
+                uniformBottomCorners: .concentric(
+                    minimum: .fixed(MenuLayout.minimumConcentricCornerRadius)
+                ),
+                topLeadingCorner: .fixed(5),
+                topTrailingCorner: .fixed(5)
+            )
+            .fill(color)
+        } else {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(color)
+        }
+    }
 }
 
 private struct HighLevelFilterField: View {
@@ -542,7 +594,14 @@ private struct RecentsPickerPopover: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(store.recentProjects) { project in
-                MenuActionRow(title: project.name, trailingSymbol: "hammer") {
+                MenuActionRow(
+                    title: project.name,
+                    trailingSymbol: "hammer",
+                    usesConcentricTopCorners: MenuLayout.isTopItem(
+                        project.id,
+                        firstID: store.recentProjects.first?.id
+                    )
+                ) {
                     store.openProject(at: project.url)
                     isPresented = false
                 }
@@ -550,16 +609,16 @@ private struct RecentsPickerPopover: View {
             }
 
             Divider()
-                .padding(.vertical, 4)
+                .padding(.vertical, MenuLayout.standardSeparatorSpacing)
 
-            Button("Clear Recents…", role: .destructive) {
+            MenuActionRow(
+                title: "Clear Recents…",
+                usesConcentricBottomCorners: true,
+                role: .destructive
+            ) {
                 showsClearConfirmation = true
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.red)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            .padding(.bottom, 6)
         }
         .padding(.top, 6)
         .frame(width: 280)
@@ -603,11 +662,14 @@ private struct MenuActionRow: View {
     let title: String
     var trailingSymbol: String?
     var isEnabled = true
+    var usesConcentricTopCorners = false
+    var usesConcentricBottomCorners = false
+    var role: ButtonRole?
     let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
-        Button(action: action) {
+        Button(role: role, action: action) {
             HStack {
                 Text(title)
                 Spacer()
@@ -617,14 +679,41 @@ private struct MenuActionRow: View {
                 }
             }
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: MenuLayout.menuItemHeight)
             .contentShape(.rect)
-            .foregroundStyle(isEnabled ? (isHovered ? Color.white : Color.primary) : Color.secondary)
-            .background(isHovered && isEnabled ? Color.accentColor : .clear, in: .rect(cornerRadius: 5))
+            .foregroundStyle(rowForeground)
+            .background {
+                rowBackground
+            }
             .padding(.horizontal, 5)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .onHover { isHovered = $0 }
+    }
+
+    @ViewBuilder
+    private var rowBackground: some View {
+        let color = isHovered && isEnabled ? Color.accentColor : Color.clear
+        if usesConcentricTopCorners || usesConcentricBottomCorners {
+            ConcentricRectangle(
+                uniformTopCorners: usesConcentricTopCorners ? concentricCorner : .fixed(5),
+                uniformBottomCorners: usesConcentricBottomCorners ? concentricCorner : .fixed(5)
+            )
+            .fill(color)
+        } else {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(color)
+        }
+    }
+
+    private var concentricCorner: Edge.Corner.Style {
+        .concentric(minimum: .fixed(MenuLayout.minimumConcentricCornerRadius))
+    }
+
+    private var rowForeground: Color {
+        guard isEnabled else { return .secondary }
+        if isHovered { return .white }
+        return role == .destructive ? .red : .primary
     }
 }

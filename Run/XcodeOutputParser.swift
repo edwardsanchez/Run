@@ -91,24 +91,55 @@ enum XcodeOutputParser {
         return groups
     }
 
-    static func appBuildSettings(from data: Data) throws -> (path: URL, bundleIdentifier: String, executableName: String) {
-        let object = try JSONSerialization.jsonObject(with: data)
-        guard let targets = object as? [[String: Any]] else { throw RunError.appProductNotFound }
-
-        for target in targets {
+    static func appBuildSettings(
+        from data: Data,
+        targetName: String? = nil,
+        productName: String? = nil
+    ) throws -> AppBuildSettings {
+        let targets = try buildSettings(from: data)
+        let apps = targets.compactMap { target -> AppBuildSettings? in
+            let settings = target.values
             guard
-                let settings = target["buildSettings"] as? [String: Any],
-                settings["WRAPPER_EXTENSION"] as? String == "app",
-                let directory = settings["TARGET_BUILD_DIR"] as? String,
-                let product = settings["FULL_PRODUCT_NAME"] as? String,
-                let bundleIdentifier = settings["PRODUCT_BUNDLE_IDENTIFIER"] as? String,
-                let executableName = settings["EXECUTABLE_NAME"] as? String
-            else { continue }
-
-            return (URL(fileURLWithPath: directory).appendingPathComponent(product), bundleIdentifier, executableName)
+                settings["WRAPPER_EXTENSION"] == "app",
+                let directory = settings["TARGET_BUILD_DIR"],
+                let product = settings["FULL_PRODUCT_NAME"],
+                let bundleIdentifier = settings["PRODUCT_BUNDLE_IDENTIFIER"],
+                let executableName = settings["EXECUTABLE_NAME"]
+            else { return nil }
+            return AppBuildSettings(
+                path: URL(fileURLWithPath: directory).appendingPathComponent(product),
+                bundleIdentifier: bundleIdentifier,
+                executableName: executableName,
+                targetName: target.targetName,
+                values: settings
+            )
         }
 
+        if let match = apps.first(where: { app in
+            let matchesTarget = targetName == nil || app.targetName == targetName
+                || app.values["TARGET_NAME"] == targetName
+            let matchesProduct = productName == nil || app.values["FULL_PRODUCT_NAME"] == productName
+            return matchesTarget && matchesProduct
+        }) {
+            return match
+        }
         throw RunError.appProductNotFound
+    }
+
+    static func buildSettings(from data: Data) throws -> [TargetBuildSettings] {
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard let targets = object as? [[String: Any]] else { throw RunError.appProductNotFound }
+        return targets.compactMap { target in
+            guard let rawSettings = target["buildSettings"] as? [String: Any] else { return nil }
+            let settings = rawSettings.reduce(into: [String: String]()) { result, pair in
+                if let value = pair.value as? String {
+                    result[pair.key] = value
+                } else if pair.value is NSNumber {
+                    result[pair.key] = String(describing: pair.value)
+                }
+            }
+            return TargetBuildSettings(targetName: target["target"] as? String, values: settings)
+        }
     }
 
     static func deviceProcessIdentifier(from data: Data) -> Int? {

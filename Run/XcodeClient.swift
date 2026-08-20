@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class XcodeClient {
     private var activeProcess: Process?
+    private var launchedMacProcess: Process?
 
     func loadConfiguration(
         for project: XcodeProject,
@@ -73,48 +74,114 @@ final class XcodeClient {
 
     func buildAndLaunch(project: XcodeProject, scheme: String, destination: RunDestination) async throws -> LaunchContext {
         guard destination.isRunnable else { throw RunError.noRunnableDestination }
-        let destinationArguments = ["-scheme", scheme, "-destination", destination.commandSpecifier, "-configuration", "Debug"]
+        let schemeConfiguration = try SchemeRunConfigurationParser.configuration(in: project, scheme: scheme)
+        switch schemeConfiguration.runnableKind {
+        case .generated, .buildableProduct:
+            break
+        case .unsupported(let kind):
+            throw RunError.unsupportedRunAction(kind)
+        }
+        guard schemeConfiguration.launchStyle == "0" else {
+            throw RunError.unsupportedRunAction("wait for executable launch style")
+        }
+        let destinationArguments = [
+            "-scheme", scheme,
+            "-destination", destination.commandSpecifier,
+            "-configuration", schemeConfiguration.buildConfiguration,
+        ] + SchemeLaunchPlan.sanitizerArguments(for: schemeConfiguration)
         _ = try await xcodebuild(containerArguments(for: project) + destinationArguments + ["build"])
         try Task.checkCancellation()
 
         let settingsResult = try await xcodebuild(
             containerArguments(for: project) + destinationArguments + ["-showBuildSettings", "-json"]
         )
-        let settings = try XcodeOutputParser.appBuildSettings(from: settingsResult.standardOutput)
+        let allBuildSettings = try XcodeOutputParser.buildSettings(from: settingsResult.standardOutput)
+        let settings = try XcodeOutputParser.appBuildSettings(
+            from: settingsResult.standardOutput,
+            targetName: schemeConfiguration.executableTargetName,
+            productName: schemeConfiguration.executableProductName
+        )
+        let launchConfiguration = SchemeLaunchPlan.resolve(
+            schemeConfiguration,
+            buildSettings: settings.values
+        )
         try Task.checkCancellation()
 
+        let preActions = preparedActions(
+            launchConfiguration.preActions,
+            allBuildSettings: allBuildSettings,
+            fallbackSettings: settings.values,
+            project: project
+        )
+        let postActions = preparedActions(
+            launchConfiguration.postActions,
+            allBuildSettings: allBuildSettings,
+            fallbackSettings: settings.values,
+            project: project
+        )
         var deviceProcessIdentifier: Int?
-        if destination.isMac {
-            _ = try await command(executable: "/usr/bin/open", arguments: ["-n", settings.path.path])
-        } else if destination.isSimulator, let identifier = destination.identifier {
-            _ = try? await developerCommand("simctl", arguments: ["boot", identifier])
-            _ = try await developerCommand("simctl", arguments: ["bootstatus", identifier, "-b"])
-            _ = try await developerCommand("simctl", arguments: ["install", identifier, settings.path.path])
-            _ = try await developerCommand("simctl", arguments: ["launch", identifier, settings.bundleIdentifier])
-        } else if let identifier = destination.identifier {
-            _ = try await developerCommand("devicectl", arguments: [
-                "device", "install", "app", "--device", identifier, settings.path.path,
-            ])
-            let launchResult = try await developerCommand("devicectl", arguments: [
-                "device", "process", "launch", "--device", identifier,
-                "--terminate-existing", "--json-output", "-", settings.bundleIdentifier,
-            ])
-            deviceProcessIdentifier = XcodeOutputParser.deviceProcessIdentifier(from: launchResult.standardOutput)
+        do {
+            for action in preActions {
+                _ = try await run(action)
+                try Task.checkCancellation()
+            }
+
+            if destination.isMac {
+                deviceProcessIdentifier = try await launchMacApplication(
+                    settings: settings,
+                    configuration: launchConfiguration
+                )
+            } else if destination.isSimulator, let identifier = destination.identifier {
+                _ = try? await developerCommand("simctl", arguments: ["boot", identifier])
+                _ = try await developerCommand("simctl", arguments: ["bootstatus", identifier, "-b"])
+                _ = try await developerCommand("simctl", arguments: ["install", identifier, settings.path.path])
+                _ = try await developerCommand(
+                    "simctl",
+                    arguments: SchemeLaunchPlan.simulatorLaunchArguments(
+                        identifier: identifier,
+                        bundleIdentifier: settings.bundleIdentifier,
+                        configuration: launchConfiguration
+                    ),
+                    environment: SchemeLaunchPlan.simulatorEnvironment(for: launchConfiguration)
+                )
+            } else if let identifier = destination.identifier {
+                _ = try await developerCommand("devicectl", arguments: [
+                    "device", "install", "app", "--device", identifier, settings.path.path,
+                ])
+                let launchResult = try await developerCommand(
+                    "devicectl",
+                    arguments: SchemeLaunchPlan.deviceLaunchArguments(
+                        identifier: identifier,
+                        bundleIdentifier: settings.bundleIdentifier,
+                        configuration: launchConfiguration
+                    ),
+                    environment: SchemeLaunchPlan.deviceEnvironment(for: launchConfiguration)
+                )
+                deviceProcessIdentifier = XcodeOutputParser.deviceProcessIdentifier(from: launchResult.standardOutput)
+            }
+        } catch {
+            for action in postActions {
+                _ = try? await run(action)
+            }
+            throw error
         }
 
         return LaunchContext(
             bundleIdentifier: settings.bundleIdentifier,
             executableName: settings.executableName,
             destination: destination,
-            deviceProcessIdentifier: deviceProcessIdentifier
+            deviceProcessIdentifier: deviceProcessIdentifier,
+            postActions: postActions
         )
     }
 
-    func stop(_ context: LaunchContext?) async {
+    func stop(_ context: LaunchContext?) async throws {
         cancelActiveCommand()
         guard let context else { return }
 
         if context.destination.isMac {
+            launchedMacProcess?.terminate()
+            launchedMacProcess = nil
             let applications = NSRunningApplication.runningApplications(withBundleIdentifier: context.bundleIdentifier)
             applications.forEach { $0.terminate() }
         } else if context.destination.isSimulator, let identifier = context.destination.identifier {
@@ -127,6 +194,10 @@ final class XcodeClient {
                 "device", "process", "terminate", "--device", identifier,
                 "--pid", String(processIdentifier),
             ])
+        }
+
+        for action in context.postActions {
+            _ = try await run(action)
         }
     }
 
@@ -205,12 +276,84 @@ final class XcodeClient {
         return try await command(executable: executable, arguments: arguments)
     }
 
-    private func developerCommand(_ tool: String, arguments: [String]) async throws -> CommandResult {
+    private func developerCommand(
+        _ tool: String,
+        arguments: [String],
+        environment: [String: String] = [:]
+    ) async throws -> CommandResult {
         try await command(
             executable: "/usr/bin/xcrun",
             arguments: [tool] + arguments,
-            environment: ["DEVELOPER_DIR": developerDirectory.path]
+            environment: environment.merging(["DEVELOPER_DIR": developerDirectory.path]) { current, _ in current }
         )
+    }
+
+    private func preparedActions(
+        _ actions: [SchemeExecutionAction],
+        allBuildSettings: [TargetBuildSettings],
+        fallbackSettings: [String: String],
+        project: XcodeProject
+    ) -> [PreparedSchemeExecutionAction] {
+        actions.map { action in
+            let settings = allBuildSettings.first { candidate in
+                action.targetName == candidate.targetName || action.targetName == candidate.values["TARGET_NAME"]
+            }?.values ?? fallbackSettings
+            let environment = ProcessInfo.processInfo.environment.merging(settings) { _, setting in setting }
+            let workingDirectory = settings["SRCROOT"].map(URL.init(fileURLWithPath:))
+                ?? project.url.deletingLastPathComponent()
+            return PreparedSchemeExecutionAction(
+                action: action,
+                environment: environment,
+                workingDirectory: workingDirectory
+            )
+        }
+    }
+
+    private func run(_ action: PreparedSchemeExecutionAction) async throws -> CommandResult {
+        try await command(
+            executable: "/bin/sh",
+            arguments: ["-c", action.action.script],
+            environment: action.environment,
+            currentDirectory: action.workingDirectory
+        )
+    }
+
+    private func launchMacApplication(
+        settings: AppBuildSettings,
+        configuration: ResolvedSchemeRunConfiguration
+    ) async throws -> Int? {
+        if let workingDirectory = configuration.workingDirectory {
+            let process = Process()
+            process.executableURL = settings.path
+                .appendingPathComponent("Contents/MacOS")
+                .appendingPathComponent(settings.executableName)
+            process.arguments = configuration.arguments
+            process.environment = ProcessInfo.processInfo.environment.merging(configuration.environment) { _, scheme in scheme }
+            process.currentDirectoryURL = workingDirectory
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+            } catch {
+                throw RunError.commandFailed(error.localizedDescription)
+            }
+            launchedMacProcess = process
+            return Int(process.processIdentifier)
+        }
+
+        let openConfiguration = NSWorkspace.OpenConfiguration()
+        openConfiguration.arguments = configuration.arguments
+        openConfiguration.environment = configuration.environment
+        openConfiguration.createsNewApplicationInstance = true
+        return try await withCheckedThrowingContinuation { continuation in
+            NSWorkspace.shared.openApplication(at: settings.path, configuration: openConfiguration) { application, error in
+                if let error {
+                    continuation.resume(throwing: RunError.commandFailed(error.localizedDescription))
+                } else {
+                    continuation.resume(returning: application.map { Int($0.processIdentifier) })
+                }
+            }
+        }
     }
 
     private var developerDirectory: URL {
@@ -233,7 +376,8 @@ final class XcodeClient {
     private func command(
         executable: String,
         arguments: [String],
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        currentDirectory: URL? = nil
     ) async throws -> CommandResult {
         let process = Process()
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -254,6 +398,7 @@ final class XcodeClient {
         process.standardOutput = outputHandle
         process.standardError = errorHandle
         process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        process.currentDirectoryURL = currentDirectory
         activeProcess = process
 
         do {
