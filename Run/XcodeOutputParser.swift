@@ -81,13 +81,11 @@ enum XcodeOutputParser {
         let runnable = destinations.filter { $0.isRunnable && !recentSet.contains($0.id) }
         let devices = runnable.filter { !$0.isSimulator }
         let simulators = runnable.filter(\.isSimulator)
-        let unavailable = destinations.filter { $0.availabilityError != nil }
 
         var groups: [RunDestinationGroup] = []
         if !recent.isEmpty { groups.append(RunDestinationGroup(name: "Recent", destinations: recent)) }
         if !devices.isEmpty { groups.append(RunDestinationGroup(name: "Devices", destinations: devices)) }
         if !simulators.isEmpty { groups.append(RunDestinationGroup(name: "Simulators", destinations: simulators)) }
-        if !unavailable.isEmpty { groups.append(RunDestinationGroup(name: "Incompatible", destinations: unavailable)) }
         return groups
     }
 

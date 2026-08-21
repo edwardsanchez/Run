@@ -67,6 +67,10 @@ final class AppStore {
         )
     }
 
+    var visibleDestinations: [RunDestination] {
+        destinationGroups.flatMap(\.destinations)
+    }
+
     var menuContent: MenuContent {
         MenuContent(
             projectName: project?.name,

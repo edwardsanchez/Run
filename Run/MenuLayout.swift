@@ -11,6 +11,7 @@ enum MenuLayout {
     static let schemePickerMaximumListHeight = 360.0
     static let destinationPickerMaximumListHeight = 500.0
     static let minimumConcentricCornerRadius = menuItemHeight / 2
+    static let filterMinimumItemCount = 6
     static let recentsChevronCollapsedRotation = 0.0
     static let recentsChevronExpandedRotation = 90.0
 
@@ -28,6 +29,14 @@ enum MenuLayout {
                 + pickerContentVerticalPadding,
             destinationPickerMaximumListHeight
         )
+    }
+
+    static func shouldShowFilter(itemCount: Int) -> Bool {
+        itemCount >= filterMinimumItemCount
+    }
+
+    static func shouldOpenPicker(itemCount: Int) -> Bool {
+        itemCount > 1
     }
 
     static func isTopItem<ID: Equatable>(_ id: ID, firstID: ID?) -> Bool {
@@ -56,7 +65,6 @@ enum MenuLayout {
 
 struct RecentsAccordionState: Equatable {
     private(set) var isExpanded = false
-    private(set) var highlightedIndex: Int?
 
     mutating func toggle(itemCount: Int) {
         if isExpanded {
@@ -69,18 +77,10 @@ struct RecentsAccordionState: Equatable {
     mutating func expand(itemCount: Int) {
         guard itemCount > 0 else { return }
         isExpanded = true
-        highlightedIndex = 0
     }
 
     mutating func collapse() {
         isExpanded = false
-        highlightedIndex = nil
-    }
-
-    mutating func moveHighlight(by offset: Int, itemCount: Int) {
-        guard isExpanded, itemCount > 0 else { return }
-        let current = highlightedIndex ?? (offset > 0 ? -1 : itemCount)
-        highlightedIndex = min(max(current + offset, 0), itemCount - 1)
     }
 
     mutating func reconcile(itemCount: Int) {
@@ -88,14 +88,69 @@ struct RecentsAccordionState: Equatable {
             collapse()
             return
         }
-        guard isExpanded else { return }
-        highlightedIndex = min(highlightedIndex ?? 0, itemCount - 1)
     }
 
     var chevronRotation: Double {
         isExpanded
             ? MenuLayout.recentsChevronExpandedRotation
             : MenuLayout.recentsChevronCollapsedRotation
+    }
+}
+
+enum MenuSelectionSource: Equatable {
+    case keyboard
+    case mouse
+}
+
+struct MenuSelectionState<ID: Equatable>: Equatable {
+    private(set) var selectedID: ID?
+    private(set) var source: MenuSelectionSource?
+
+    mutating func selectFromKeyboard(_ id: ID?) {
+        selectedID = id
+        source = id == nil ? nil : .keyboard
+    }
+
+    mutating func selectFromMouse(_ id: ID) {
+        selectedID = id
+        source = .mouse
+    }
+
+    mutating func clearMouseSelection(if id: ID) {
+        guard source == .mouse, selectedID == id else { return }
+        selectedID = nil
+        source = nil
+    }
+
+    mutating func moveFromKeyboard(
+        by offset: Int,
+        through orderedIDs: [ID],
+        fallbackID: ID?
+    ) {
+        guard !orderedIDs.isEmpty else {
+            selectFromKeyboard(nil)
+            return
+        }
+        guard let selectedID, let current = orderedIDs.firstIndex(of: selectedID) else {
+            selectFromKeyboard(fallbackID ?? orderedIDs[0])
+            return
+        }
+        let next = min(max(current + offset, 0), orderedIDs.count - 1)
+        selectFromKeyboard(orderedIDs[next])
+    }
+}
+
+struct MouseMovementGate<Position: Equatable>: Equatable {
+    private(set) var lastPosition: Position?
+
+    mutating func recordCurrentPosition(_ position: Position) {
+        lastPosition = position
+    }
+
+    mutating func registerMovement(to position: Position) -> Bool {
+        guard position != lastPosition else { return false }
+        lastPosition = position
+        return true
     }
 }
 

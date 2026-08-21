@@ -174,12 +174,31 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
+private enum MainMenuSelectionID: Equatable {
+    case open
+    case recents
+    case recent(String)
+    case clearRecents
+    case quit
+}
+
+private struct RecentsContentHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
     @State private var showsSchemePicker = false
     @State private var showsDestinationPicker = false
     @State private var recentsState = RecentsAccordionState()
+    @State private var menuSelection = MenuSelectionState<MainMenuSelectionID>()
     @State private var showsClearRecentsConfirmation = false
+    @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
+    @State private var recentsContentHeight: CGFloat = 0
     @FocusState private var isRecentsFocused: Bool
 
     var body: some View {
@@ -208,7 +227,11 @@ struct MenuBarPopoverView: View {
 
             }
 
-            ProjectOpenRow(showsDivider: store.project != nil) {
+            ProjectOpenRow(
+                showsDivider: store.project != nil,
+                isHighlighted: menuSelection.selectedID == .open,
+                onMouseActivity: { trackMouse($0, over: .open) }
+            ) {
                 store.chooseProject()
             }
 
@@ -218,21 +241,25 @@ struct MenuBarPopoverView: View {
                 MenuActionRow(
                     title: "Recents",
                     trailingSymbol: "chevron.right",
-                    trailingSymbolRotation: recentsState.chevronRotation
+                    trailingSymbolRotation: recentsState.chevronRotation,
+                    isHighlighted: menuSelection.selectedID == .recents,
+                    onMouseActivity: { trackMouse($0, over: .recents) }
                 ) {
                     toggleRecents()
                 }
 
-                if recentsState.isExpanded {
-                    recentsAccordion
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
+                maskedRecentsAccordion
             }
 
             Divider()
                 .padding(.vertical, MenuLayout.standardSeparatorSpacing)
 
-            MenuActionRow(title: "Quit", usesConcentricBottomCorners: true) {
+            MenuActionRow(
+                title: "Quit",
+                isHighlighted: menuSelection.selectedID == .quit,
+                usesConcentricBottomCorners: true,
+                onMouseActivity: { trackMouse($0, over: .quit) }
+            ) {
                 NSApplication.shared.terminate(nil)
             }
         }
@@ -243,6 +270,9 @@ struct MenuBarPopoverView: View {
             recentsState.reconcile(itemCount: count)
             if !recentsState.isExpanded {
                 isRecentsFocused = false
+                if case .recent = menuSelection.selectedID {
+                    menuSelection.selectFromKeyboard(nil)
+                }
             }
         }
         .alert("Clear Recents?", isPresented: $showsClearRecentsConfirmation) {
@@ -251,6 +281,7 @@ struct MenuBarPopoverView: View {
                     recentsState.collapse()
                 }
                 isRecentsFocused = false
+                menuSelection.selectFromKeyboard(nil)
                 store.clearRecents()
             }
             Button("Cancel", role: .cancel) { }
@@ -265,7 +296,8 @@ struct MenuBarPopoverView: View {
                 MenuActionRow(
                     title: project.name,
                     trailingSymbol: "hammer",
-                    isHighlighted: index == recentsState.highlightedIndex
+                    isHighlighted: menuSelection.selectedID == .recent(project.id),
+                    onMouseActivity: { trackMouse($0, over: .recent(project.id)) }
                 ) {
                     chooseRecent(at: index)
                 }
@@ -277,7 +309,12 @@ struct MenuBarPopoverView: View {
                 .padding(.leading, 14)
                 .padding(.vertical, MenuLayout.standardSeparatorSpacing)
 
-            MenuActionRow(title: "Clear Recents…", role: .destructive) {
+            MenuActionRow(
+                title: "Clear Recents…",
+                isHighlighted: menuSelection.selectedID == .clearRecents,
+                role: .destructive,
+                onMouseActivity: { trackMouse($0, over: .clearRecents) }
+            ) {
                 showsClearRecentsConfirmation = true
             }
             .padding(.leading, 14)
@@ -290,14 +327,40 @@ struct MenuBarPopoverView: View {
         }
     }
 
+    private var maskedRecentsAccordion: some View {
+        recentsAccordion
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: RecentsContentHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            }
+            .frame(
+                height: recentsState.isExpanded ? recentsContentHeight : 0,
+                alignment: .top
+            )
+            .clipped()
+            .allowsHitTesting(recentsState.isExpanded)
+            .accessibilityHidden(!recentsState.isExpanded)
+            .onPreferenceChange(RecentsContentHeightPreferenceKey.self) { height in
+                recentsContentHeight = height
+            }
+    }
+
     private func toggleRecents() {
         let wasExpanded = recentsState.isExpanded
+        mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
         withAnimation(.easeInOut(duration: 0.18)) {
             recentsState.toggle(itemCount: store.recentProjects.count)
         }
         if wasExpanded {
             isRecentsFocused = false
+            menuSelection.selectFromMouse(.recents)
         } else {
+            menuSelection.selectFromKeyboard(firstRecentSelectionID)
             Task {
                 await Task.yield()
                 isRecentsFocused = true
@@ -308,17 +371,52 @@ struct MenuBarPopoverView: View {
     private func handleRecentsKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
         switch key {
         case .upArrow:
-            recentsState.moveHighlight(by: -1, itemCount: store.recentProjects.count)
+            moveMenuSelection(by: -1)
         case .downArrow:
-            recentsState.moveHighlight(by: 1, itemCount: store.recentProjects.count)
+            moveMenuSelection(by: 1)
         case .return:
-            if let index = recentsState.highlightedIndex {
+            if case .recent(let id) = menuSelection.selectedID,
+               let index = store.recentProjects.firstIndex(where: { $0.id == id }) {
                 chooseRecent(at: index)
+            } else if menuSelection.selectedID == .clearRecents {
+                showsClearRecentsConfirmation = true
+            } else if menuSelection.selectedID == .quit {
+                NSApplication.shared.terminate(nil)
             }
         default:
             return .ignored
         }
         return .handled
+    }
+
+    private var keyboardMenuOrder: [MainMenuSelectionID] {
+        [.open]
+            + store.recentProjects.map { .recent($0.id) }
+            + [.clearRecents, .quit]
+    }
+
+    private var firstRecentSelectionID: MainMenuSelectionID? {
+        store.recentProjects.first.map { .recent($0.id) }
+    }
+
+    private func moveMenuSelection(by offset: Int) {
+        mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
+        let fallback = offset > 0 ? firstRecentSelectionID : .open
+        menuSelection.moveFromKeyboard(
+            by: offset,
+            through: keyboardMenuOrder,
+            fallbackID: fallback
+        )
+    }
+
+    private func trackMouse(_ isActive: Bool, over id: MainMenuSelectionID) {
+        guard isActive else {
+            menuSelection.clearMouseSelection(if: id)
+            return
+        }
+        let location = NSEvent.mouseLocation
+        guard mouseMovementGate.registerMovement(to: location) else { return }
+        menuSelection.selectFromMouse(id)
     }
 
     private func chooseRecent(at index: Int) {
@@ -328,6 +426,7 @@ struct MenuBarPopoverView: View {
             recentsState.collapse()
         }
         isRecentsFocused = false
+        menuSelection.selectFromKeyboard(nil)
         store.openProject(at: project.url)
     }
 
@@ -347,41 +446,67 @@ struct MenuBarPopoverView: View {
         .background(.quaternary.opacity(0.72), in: .rect(cornerRadius: 7))
     }
 
+    @ViewBuilder
     private var schemePickerButton: some View {
-        Button {
-            showsSchemePicker.toggle()
-        } label: {
+        if MenuLayout.shouldOpenPicker(itemCount: store.schemeDescriptors.count) {
+            Button {
+                showsSchemePicker.toggle()
+            } label: {
+                PathSegmentLabel(
+                    title: store.selectedScheme ?? loadingSchemeTitle,
+                    symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape",
+                    showsMenuIndicator: true
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(store.phase.isActive)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("Scheme")
+            .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
+            .popover(isPresented: $showsSchemePicker, arrowEdge: .top) {
+                SchemePickerPopover(store: store, isPresented: $showsSchemePicker)
+            }
+        } else {
             PathSegmentLabel(
                 title: store.selectedScheme ?? loadingSchemeTitle,
-                symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape"
+                symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape",
+                showsMenuIndicator: false
             )
-        }
-        .buttonStyle(.plain)
-        .disabled(store.schemes.isEmpty || store.phase.isActive)
-        .frame(maxWidth: .infinity)
-        .accessibilityLabel("Scheme")
-        .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
-        .popover(isPresented: $showsSchemePicker, arrowEdge: .top) {
-            SchemePickerPopover(store: store, isPresented: $showsSchemePicker)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Scheme")
+            .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
         }
     }
 
+    @ViewBuilder
     private var destinationPickerButton: some View {
-        Button {
-            showsDestinationPicker.toggle()
-        } label: {
+        if MenuLayout.shouldOpenPicker(itemCount: store.visibleDestinations.count) {
+            Button {
+                showsDestinationPicker.toggle()
+            } label: {
+                PathSegmentLabel(
+                    title: store.selectedDestination?.name ?? loadingDestinationTitle,
+                    symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer",
+                    showsMenuIndicator: true
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(store.phase.isActive)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel("Run Destination")
+            .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
+            .popover(isPresented: $showsDestinationPicker, arrowEdge: .top) {
+                RunDestinationPickerPopover(store: store, isPresented: $showsDestinationPicker)
+            }
+        } else {
             PathSegmentLabel(
                 title: store.selectedDestination?.name ?? loadingDestinationTitle,
-                symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer"
+                symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer",
+                showsMenuIndicator: false
             )
-        }
-        .buttonStyle(.plain)
-        .disabled(store.destinations.isEmpty || store.phase.isActive)
-        .frame(maxWidth: .infinity)
-        .accessibilityLabel("Run Destination")
-        .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
-        .popover(isPresented: $showsDestinationPicker, arrowEdge: .top) {
-            RunDestinationPickerPopover(store: store, isPresented: $showsDestinationPicker)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Run Destination")
+            .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
         }
     }
 
@@ -396,6 +521,8 @@ struct MenuBarPopoverView: View {
 
 private struct ProjectOpenRow: View {
     let showsDivider: Bool
+    var isHighlighted = false
+    var onMouseActivity: ((Bool) -> Void)?
     let action: () -> Void
 
     var body: some View {
@@ -405,7 +532,12 @@ private struct ProjectOpenRow: View {
                     .padding(.bottom, MenuLayout.projectOpenSeparatorSpacing)
             }
 
-            MenuActionRow(title: "Open…", action: action)
+            MenuActionRow(
+                title: "Open…",
+                isHighlighted: isHighlighted,
+                onMouseActivity: onMouseActivity,
+                action: action
+            )
         }
     }
 }
@@ -414,18 +546,22 @@ private struct SchemePickerPopover: View {
     @Bindable var store: AppStore
     @Binding var isPresented: Bool
     @State private var query = ""
-    @State private var highlightedName: String?
+    @State private var selection = MenuSelectionState<String>()
+    @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
     @FocusState private var isFilterFocused: Bool
+    @FocusState private var isListFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            HighLevelFilterField(
-                text: $query,
-                isFocused: $isFilterFocused,
-                handleKey: handleKeyPress
-            )
+            if showsFilter {
+                HighLevelFilterField(
+                    text: $query,
+                    isFocused: $isFilterFocused,
+                    handleKey: handleKeyPress
+                )
 
-            Divider()
+                Divider()
+            }
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -437,12 +573,13 @@ private struct SchemePickerPopover: View {
                                 version: nil,
                                 connectionSymbol: nil,
                                 isSelected: scheme.name == store.selectedScheme,
-                                isHighlighted: scheme.name == highlightedName,
+                                isHighlighted: scheme.name == selection.selectedID,
                                 isEnabled: true,
                                 usesConcentricBottomCorners: MenuLayout.isBottomItem(
                                     scheme.id,
                                     lastID: filteredSchemes.last?.id
-                                )
+                                ),
+                                onMouseActivity: { trackMouse($0, over: scheme.name) }
                             ) {
                                 chooseScheme(scheme)
                             }
@@ -452,7 +589,13 @@ private struct SchemePickerPopover: View {
                     .padding(.vertical, 4)
                 }
                 .frame(height: MenuLayout.schemePickerListHeight(itemCount: filteredSchemes.count))
-                .onChange(of: highlightedName) { _, name in
+                .focusable(!showsFilter)
+                .focused($isListFocused)
+                .focusEffectDisabled()
+                .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
+                    handleKeyPress(press.key)
+                }
+                .onChange(of: selection.selectedID) { _, name in
                     if let name {
                         proxy.scrollTo(name, anchor: .center)
                     }
@@ -461,10 +604,14 @@ private struct SchemePickerPopover: View {
         }
         .frame(width: 320)
         .onAppear {
-            highlightedName = store.selectedScheme ?? filteredSchemes.first?.name
+            selection.selectFromKeyboard(store.selectedScheme ?? filteredSchemes.first?.name)
             Task {
                 await Task.yield()
-                isFilterFocused = true
+                if showsFilter {
+                    isFilterFocused = true
+                } else {
+                    isListFocused = true
+                }
             }
         }
         .onChange(of: query) { _, _ in
@@ -477,15 +624,19 @@ private struct SchemePickerPopover: View {
         return store.schemeDescriptors.filter { $0.name.localizedStandardContains(query) }
     }
 
+    private var showsFilter: Bool {
+        MenuLayout.shouldShowFilter(itemCount: store.schemeDescriptors.count)
+    }
+
     private func handleKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
         switch key {
         case .upArrow:
-            moveHighlight(by: -1)
+            moveSelection(by: -1)
         case .downArrow:
-            moveHighlight(by: 1)
+            moveSelection(by: 1)
         case .return:
-            if let highlightedName {
-                store.selectScheme(highlightedName)
+            if let selectedName = selection.selectedID {
+                store.selectScheme(selectedName)
                 isPresented = false
             }
         default:
@@ -494,19 +645,34 @@ private struct SchemePickerPopover: View {
         return .handled
     }
 
-    private func moveHighlight(by offset: Int) {
+    private func moveSelection(by offset: Int) {
         let schemes = filteredSchemes
         guard !schemes.isEmpty else { return }
-        let current = schemes.firstIndex { $0.name == highlightedName }
-            ?? (offset > 0 ? -1 : schemes.count)
-        let next = min(max(current + offset, 0), schemes.count - 1)
-        highlightedName = schemes[next].name
+        mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
+        let names = schemes.map(\.name)
+        selection.moveFromKeyboard(
+            by: offset,
+            through: names,
+            fallbackID: offset > 0 ? names.first : names.last
+        )
     }
 
     private func reconcileHighlight() {
-        if filteredSchemes.contains(where: { $0.name == highlightedName }) { return }
-        highlightedName = filteredSchemes.first { $0.name == store.selectedScheme }?.name
-            ?? filteredSchemes.first?.name
+        if filteredSchemes.contains(where: { $0.name == selection.selectedID }) { return }
+        selection.selectFromKeyboard(
+            filteredSchemes.first { $0.name == store.selectedScheme }?.name
+                ?? filteredSchemes.first?.name
+        )
+    }
+
+    private func trackMouse(_ isActive: Bool, over name: String) {
+        guard isActive else {
+            selection.clearMouseSelection(if: name)
+            return
+        }
+        let location = NSEvent.mouseLocation
+        guard mouseMovementGate.registerMovement(to: location) else { return }
+        selection.selectFromMouse(name)
     }
 
     private func chooseScheme(_ scheme: SchemeDescriptor) {
@@ -519,18 +685,22 @@ private struct RunDestinationPickerPopover: View {
     @Bindable var store: AppStore
     @Binding var isPresented: Bool
     @State private var query = ""
-    @State private var highlightedID: String?
+    @State private var selection = MenuSelectionState<String>()
+    @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
     @FocusState private var isFilterFocused: Bool
+    @FocusState private var isListFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            HighLevelFilterField(
-                text: $query,
-                isFocused: $isFilterFocused,
-                handleKey: handleKeyPress
-            )
+            if showsFilter {
+                HighLevelFilterField(
+                    text: $query,
+                    isFocused: $isFilterFocused,
+                    handleKey: handleKeyPress
+                )
 
-            Divider()
+                Divider()
+            }
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -553,12 +723,13 @@ private struct RunDestinationPickerPopover: View {
                                     version: destination.osVersion,
                                     connectionSymbol: destination.connectionKind?.symbolName,
                                     isSelected: destination == store.selectedDestination,
-                                    isHighlighted: destination.id == highlightedID,
+                                    isHighlighted: destination.id == selection.selectedID,
                                     isEnabled: destination.isRunnable,
                                     usesConcentricBottomCorners: MenuLayout.isBottomItem(
                                         destination.id,
                                         lastID: filteredGroups.last?.destinations.last?.id
-                                    )
+                                    ),
+                                    onMouseActivity: { trackMouse($0, over: destination.id) }
                                 ) {
                                     store.selectDestination(destination)
                                     isPresented = false
@@ -576,7 +747,13 @@ private struct RunDestinationPickerPopover: View {
                         itemCount: filteredGroups.reduce(0) { $0 + $1.destinations.count }
                     )
                 )
-                .onChange(of: highlightedID) { _, identifier in
+                .focusable(!showsFilter)
+                .focused($isListFocused)
+                .focusEffectDisabled()
+                .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
+                    handleKeyPress(press.key)
+                }
+                .onChange(of: selection.selectedID) { _, identifier in
                     if let identifier {
                         proxy.scrollTo(identifier, anchor: .center)
                     }
@@ -585,10 +762,16 @@ private struct RunDestinationPickerPopover: View {
         }
         .frame(width: 430)
         .onAppear {
-            highlightedID = store.selectedDestination?.id ?? selectableDestinations.first?.id
+            selection.selectFromKeyboard(
+                store.selectedDestination?.id ?? selectableDestinations.first?.id
+            )
             Task {
                 await Task.yield()
-                isFilterFocused = true
+                if showsFilter {
+                    isFilterFocused = true
+                } else {
+                    isListFocused = true
+                }
             }
         }
         .onChange(of: query) { _, _ in
@@ -608,6 +791,10 @@ private struct RunDestinationPickerPopover: View {
         }
     }
 
+    private var showsFilter: Bool {
+        MenuLayout.shouldShowFilter(itemCount: store.visibleDestinations.count)
+    }
+
     private func displayTitle(for destination: RunDestination) -> String {
         let duplicates = store.destinations.filter { $0.name == destination.name }
         guard duplicates.count > 1, let identifier = destination.identifier else {
@@ -623,11 +810,11 @@ private struct RunDestinationPickerPopover: View {
     private func handleKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
         switch key {
         case .upArrow:
-            moveHighlight(by: -1)
+            moveSelection(by: -1)
         case .downArrow:
-            moveHighlight(by: 1)
+            moveSelection(by: 1)
         case .return:
-            if let destination = selectableDestinations.first(where: { $0.id == highlightedID }) {
+            if let destination = selectableDestinations.first(where: { $0.id == selection.selectedID }) {
                 store.selectDestination(destination)
                 isPresented = false
             }
@@ -637,19 +824,34 @@ private struct RunDestinationPickerPopover: View {
         return .handled
     }
 
-    private func moveHighlight(by offset: Int) {
+    private func moveSelection(by offset: Int) {
         let destinations = selectableDestinations
         guard !destinations.isEmpty else { return }
-        let current = destinations.firstIndex { $0.id == highlightedID }
-            ?? (offset > 0 ? -1 : destinations.count)
-        let next = min(max(current + offset, 0), destinations.count - 1)
-        highlightedID = destinations[next].id
+        mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
+        let identifiers = destinations.map(\.id)
+        selection.moveFromKeyboard(
+            by: offset,
+            through: identifiers,
+            fallbackID: offset > 0 ? identifiers.first : identifiers.last
+        )
     }
 
     private func reconcileHighlight() {
-        if selectableDestinations.contains(where: { $0.id == highlightedID }) { return }
-        highlightedID = selectableDestinations.first { $0.id == store.selectedDestination?.id }?.id
-            ?? selectableDestinations.first?.id
+        if selectableDestinations.contains(where: { $0.id == selection.selectedID }) { return }
+        selection.selectFromKeyboard(
+            selectableDestinations.first { $0.id == store.selectedDestination?.id }?.id
+                ?? selectableDestinations.first?.id
+        )
+    }
+
+    private func trackMouse(_ isActive: Bool, over id: String) {
+        guard isActive else {
+            selection.clearMouseSelection(if: id)
+            return
+        }
+        let location = NSEvent.mouseLocation
+        guard mouseMovementGate.registerMovement(to: location) else { return }
+        selection.selectFromMouse(id)
     }
 }
 
@@ -662,8 +864,8 @@ private struct PickerSelectionRow: View {
     var isHighlighted = false
     let isEnabled: Bool
     var usesConcentricBottomCorners = false
+    var onMouseActivity: ((Bool) -> Void)?
     let action: () -> Void
-    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
@@ -709,7 +911,14 @@ private struct PickerSelectionRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .onHover { isHovered = $0 }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active:
+                onMouseActivity?(true)
+            case .ended:
+                onMouseActivity?(false)
+            }
+        }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -718,7 +927,7 @@ private struct PickerSelectionRow: View {
         return isActive ? .white : .primary
     }
 
-    private var isActive: Bool { isHovered || isHighlighted }
+    private var isActive: Bool { isHighlighted }
 
     @ViewBuilder
     private var rowBackground: some View {
@@ -767,6 +976,7 @@ private struct HighLevelFilterField: View {
 private struct PathSegmentLabel: View {
     let title: String
     let symbolName: String
+    let showsMenuIndicator: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -778,9 +988,11 @@ private struct PathSegmentLabel: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 2)
-            Image(systemName: "chevron.down")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
+            if showsMenuIndicator {
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 29)
@@ -797,8 +1009,8 @@ private struct MenuActionRow: View {
     var usesConcentricTopCorners = false
     var usesConcentricBottomCorners = false
     var role: ButtonRole?
+    var onMouseActivity: ((Bool) -> Void)?
     let action: () -> Void
-    @State private var isHovered = false
 
     var body: some View {
         Button(role: role, action: action) {
@@ -822,7 +1034,14 @@ private struct MenuActionRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .onHover { isHovered = $0 }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active:
+                onMouseActivity?(true)
+            case .ended:
+                onMouseActivity?(false)
+            }
+        }
     }
 
     @ViewBuilder
@@ -850,5 +1069,5 @@ private struct MenuActionRow: View {
         return role == .destructive ? .red : .primary
     }
 
-    private var isActive: Bool { isHovered || isHighlighted }
+    private var isActive: Bool { isHighlighted }
 }

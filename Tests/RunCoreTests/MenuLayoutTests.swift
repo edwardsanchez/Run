@@ -29,6 +29,18 @@ struct MenuLayoutTests {
         #expect(MenuLayout.destinationPickerListHeight(groupCount: 10, itemCount: 100) == 500)
     }
 
+    @Test func pickerFilterAppearsOnlyWhenAListHasMoreThanFiveItems() {
+        #expect(!MenuLayout.shouldShowFilter(itemCount: 0))
+        #expect(!MenuLayout.shouldShowFilter(itemCount: 5))
+        #expect(MenuLayout.shouldShowFilter(itemCount: 6))
+    }
+
+    @Test func pickerOpensOnlyWhenThereIsMoreThanOneChoice() {
+        #expect(!MenuLayout.shouldOpenPicker(itemCount: 0))
+        #expect(!MenuLayout.shouldOpenPicker(itemCount: 1))
+        #expect(MenuLayout.shouldOpenPicker(itemCount: 2))
+    }
+
     @Test func runControlShowsBuildProgressUntilStopIsDeliberatelyRevealed() {
         #expect(MenuLayout.runControlPresentation(
             phase: .building,
@@ -62,31 +74,62 @@ struct MenuLayoutTests {
         ) == .run)
     }
 
-    @Test func recentsAccordionExpandsWithFirstItemFocusedAndReversesOnSecondToggle() {
+    @Test func recentsAccordionExpandsAndReversesOnSecondToggle() {
         var state = RecentsAccordionState()
 
         state.toggle(itemCount: 5)
         #expect(state.isExpanded)
-        #expect(state.highlightedIndex == 0)
         #expect(state.chevronRotation == MenuLayout.recentsChevronExpandedRotation)
 
         state.toggle(itemCount: 5)
         #expect(!state.isExpanded)
-        #expect(state.highlightedIndex == nil)
         #expect(state.chevronRotation == MenuLayout.recentsChevronCollapsedRotation)
     }
 
-    @Test func recentsAccordionKeyboardHighlightMovesWithinAvailableItems() {
-        var state = RecentsAccordionState()
-        state.expand(itemCount: 3)
+    @Test func keyboardNavigationOwnsTheOnlySelectionUntilTheMouseMoves() {
+        var selection = MenuSelectionState<String>()
+        selection.selectFromMouse("Recents")
+        #expect(selection.selectedID == "Recents")
+        #expect(selection.source == .mouse)
 
-        state.moveHighlight(by: 1, itemCount: 3)
-        #expect(state.highlightedIndex == 1)
-        state.moveHighlight(by: 1, itemCount: 3)
-        state.moveHighlight(by: 1, itemCount: 3)
-        #expect(state.highlightedIndex == 2)
-        state.moveHighlight(by: -1, itemCount: 3)
-        #expect(state.highlightedIndex == 1)
+        selection.selectFromKeyboard("First Recent")
+        #expect(selection.selectedID == "First Recent")
+        #expect(selection.source == .keyboard)
+
+        selection.clearMouseSelection(if: "Recents")
+        #expect(selection.selectedID == "First Recent")
+
+        selection.selectFromMouse("Open")
+        #expect(selection.selectedID == "Open")
+        #expect(selection.source == .mouse)
+    }
+
+    @Test func arrowNavigationStealsSelectionAndMovesThroughOneOrderedMenu() {
+        var selection = MenuSelectionState<String>()
+        let items = ["Open", "First Recent", "Second Recent", "Clear", "Quit"]
+
+        selection.selectFromMouse("Open")
+        selection.moveFromKeyboard(by: 1, through: items, fallbackID: "First Recent")
+        #expect(selection.selectedID == "First Recent")
+        #expect(selection.source == .keyboard)
+
+        selection.moveFromKeyboard(by: 1, through: items, fallbackID: "First Recent")
+        #expect(selection.selectedID == "Second Recent")
+        selection.moveFromKeyboard(by: -1, through: items, fallbackID: "First Recent")
+        #expect(selection.selectedID == "First Recent")
+    }
+
+    @Test func staticMouseDoesNotReclaimSelectionUntilItsPositionChanges() {
+        var gate = MouseMovementGate<String>()
+
+        gate.recordCurrentPosition("over Recents")
+        let staticRecents = gate.registerMovement(to: "over Recents")
+        let movedToOpen = gate.registerMovement(to: "over Open")
+        let staticOpen = gate.registerMovement(to: "over Open")
+
+        #expect(!staticRecents)
+        #expect(movedToOpen)
+        #expect(!staticOpen)
     }
 
     @Test func recentsAccordionDoesNotOpenWithoutItemsAndClosesWhenItemsDisappear() {
@@ -97,6 +140,5 @@ struct MenuLayoutTests {
         state.expand(itemCount: 2)
         state.reconcile(itemCount: 0)
         #expect(!state.isExpanded)
-        #expect(state.highlightedIndex == nil)
     }
 }
