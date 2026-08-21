@@ -1,0 +1,114 @@
+{
+  "color-space-for-untagged-svg-colors" : "display-p3",
+  "features" : [
+    "refractivity"
+  ],
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.34510,0.74510,0.96471,1.00000",
+      "display-p3:0.18431,0.43529,0.96471,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "blur-material" : 0.3,
+      "layers" : [
+        {
+          "fill" : {
+            "solid" : "display-p3:0.94912,0.97642,0.99607,1.00000"
+          },
+          "image-name" : "Image.png",
+          "name" : "Image",
+          "opacity" : 0.9,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              34.03125,
+              -0.5
+            ]
+          }
+        }
+      ],
+      "refractivity" : {
+        "depth" : 0.504296875,
+        "enabled" : true,
+        "strength" : -0.3620703125
+      },
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.6
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.2
+      }
+    },
+    {
+      "hidden-specializations" : [
+        {
+          "value" : true
+        },
+        {
+          "appearance" : "dark",
+          "value" : false
+        },
+        {
+          "appearance" : "tinted",
+          "value" : false
+        }
+      ],
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "linear-gradient" : [
+                  "display-p3:0.54250,0.93702,0.98825,1.00000",
+                  "display-p3:0.28972,0.61878,0.96867,1.00000"
+                ]
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.94912,0.97642,0.99607,0.13172"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "display-p3:0.94912,0.97642,0.99607,0.23600"
+              }
+            }
+          ],
+          "glass" : false,
+          "hidden" : true,
+          "image-name" : "Lines 2.svg",
+          "name" : "Lines",
+          "position" : {
+            "scale" : 2,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "name" : "Lines",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0.5
+      },
+      "specular" : false,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

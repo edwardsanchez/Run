@@ -12,16 +12,21 @@ struct XcodeOutputParserTests {
         let output = """
         Destinations compatible with the "Demo" scheme:
             { platform:macOS, arch:arm64, id:MAC-ID, name:My Mac }
+            { platform:macOS, arch:arm64, variant:Mac Catalyst, id:CATALYST-ID, name:My Mac }
+            { platform:macOS, arch:arm64, variant:Designed for [iPad,iPhone], id:IOS-ON-MAC-ID, name:My Mac }
             { platform:iOS Simulator, id:SIM-ID, OS:27.0, name:iPhone 18 Pro }
             { platform:iOS Simulator, name:Any iOS Simulator Device }
         """
 
         let destinations = XcodeOutputParser.destinations(from: output)
-        #expect(destinations.count == 3)
+        #expect(destinations.count == 4)
         #expect(destinations[0].isMac)
-        #expect(destinations[1].isSimulator)
-        #expect(destinations[2].isGeneric)
-        #expect(!destinations[2].isRunnable)
+        #expect(destinations[1].isMac)
+        #expect(destinations[1].id.contains("CATALYST-ID"))
+        #expect(destinations.contains { $0.id.contains("IOS-ON-MAC-ID") } == false)
+        #expect(destinations[2].isSimulator)
+        #expect(destinations[3].isGeneric)
+        #expect(!destinations[3].isRunnable)
     }
 
     @Test func bootedSimulatorIsPreferredOverListOrder() {

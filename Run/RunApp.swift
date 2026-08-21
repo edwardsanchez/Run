@@ -18,6 +18,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let processIdentifier = ProcessInfo.processInfo.processIdentifier
+        let runningApplications = Bundle.main.bundleIdentifier.map {
+            NSRunningApplication.runningApplications(withBundleIdentifier: $0)
+        } ?? []
+        let processIdentifiersToTerminate = Set(SingleInstancePolicy.processIdentifiersToTerminate(
+            currentProcessIdentifier: processIdentifier,
+            runningProcessIdentifiers: runningApplications.map(\.processIdentifier)
+        ))
+        for application in runningApplications
+        where processIdentifiersToTerminate.contains(application.processIdentifier) {
+            application.forceTerminate()
+        }
+
         let controller = StatusItemController(store: store)
         statusItemController = controller
 

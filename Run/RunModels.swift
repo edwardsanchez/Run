@@ -159,6 +159,15 @@ enum RunPhase: Equatable, Sendable {
     }
 }
 
+enum SingleInstancePolicy {
+    static func processIdentifiersToTerminate(
+        currentProcessIdentifier: Int32,
+        runningProcessIdentifiers: [Int32]
+    ) -> [Int32] {
+        runningProcessIdentifiers.filter { $0 != currentProcessIdentifier }
+    }
+}
+
 struct LaunchContext: Equatable, Sendable {
     let bundleIdentifier: String
     let executableName: String

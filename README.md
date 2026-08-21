@@ -34,6 +34,7 @@ Run reproduces the common build-install-launch path with public command-line too
 - Schemes that run a custom executable (`PathRunnable`), use a remote runnable (`RemoteRunnable`), or wait for an executable to be launched are rejected.
 - Breakpoints, debugger attachment and console integration, view debugging, memory graph debugging, GPU or frame capture, profiling, and other Xcode-owned diagnostics are unavailable.
 - Test, Profile, Analyze, and Archive scheme actions are not run.
+- My Mac destinations for apps designed for iPad or iPhone are hidden because their launch pipeline is only available through Xcode.
 - Scheme options beyond the explicitly supported settings listed above may be ignored or rejected. Xcode can add new scheme behaviors that Run does not yet understand.
 - Device launches still depend on Xcode's command-line device support and the project's signing configuration. A destination that appears in the menu may remain unavailable until Xcode's setup requirements are satisfied.
 

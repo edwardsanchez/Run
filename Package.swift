@@ -12,6 +12,7 @@ let package = Package(
             exclude: [
                 "Assets.xcassets",
                 "Info.plist",
+                "Run.icon",
                 "RunApp.swift",
                 "AppStore.swift",
                 "XcodeClient.swift",

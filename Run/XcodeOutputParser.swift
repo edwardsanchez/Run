@@ -56,6 +56,9 @@ enum XcodeOutputParser {
             }
 
             guard let platform = fields["platform"], let name = fields["name"] else { return nil }
+            let isIOSAppOnMac = platform == "macOS"
+                && fields["variant"]?.localizedCaseInsensitiveContains("Designed for") == true
+            guard !isIOSAppOnMac else { return nil }
             let identifier = fields["id"].flatMap { $0 == "dvtdevice-DVTiPhonePlaceholder-iphoneos:placeholder" ? nil : $0 }
             let error = fields["error"]
             let generic = identifier == nil || identifier?.localizedCaseInsensitiveContains("placeholder") == true || name.hasPrefix("Any ")
