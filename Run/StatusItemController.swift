@@ -556,6 +556,9 @@ private struct ProjectOpenRow: View {
             MenuActionRow(
                 title: "Open…",
                 isHighlighted: isHighlighted,
+                usesConcentricTopCorners: MenuLayout.projectOpenUsesConcentricTopCorners(
+                    showsDivider: showsDivider
+                ),
                 onMouseActivity: onMouseActivity,
                 action: action
             )

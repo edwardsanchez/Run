@@ -39,6 +39,10 @@ enum MenuLayout {
         itemCount > 1
     }
 
+    static func projectOpenUsesConcentricTopCorners(showsDivider: Bool) -> Bool {
+        !showsDivider
+    }
+
     static func isTopItem<ID: Equatable>(_ id: ID, firstID: ID?) -> Bool {
         id == firstID
     }

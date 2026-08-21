@@ -6,6 +6,8 @@ struct MenuLayoutTests {
         #expect(MenuLayout.projectOpenDividerRemainsVisible)
         #expect(MenuLayout.projectOpenSeparatorSpacing > 0)
         #expect(MenuLayout.projectOpenSeparatorSpacing == MenuLayout.standardSeparatorSpacing)
+        #expect(MenuLayout.projectOpenUsesConcentricTopCorners(showsDivider: false))
+        #expect(!MenuLayout.projectOpenUsesConcentricTopCorners(showsDivider: true))
     }
 
     @Test func onlyPopoverEdgeItemsUseConcentricCorners() {
