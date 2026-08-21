@@ -133,6 +133,7 @@ struct SchemeDescriptor: Equatable, Hashable, Identifiable, Sendable {
 
     var id: String { name }
     var symbolName: String { productKind.symbolName }
+    var usesAppIconFallback: Bool { productKind == .app }
 }
 
 struct RunDestinationGroup: Equatable, Identifiable, Sendable {

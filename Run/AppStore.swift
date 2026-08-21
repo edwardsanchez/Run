@@ -17,22 +17,30 @@ final class AppStore {
     private(set) var isLoadingSchemes = false
     private(set) var isLoadingDestinations = false
     private(set) var recentDestinationIDs: [String] = []
+    private(set) var schemeIconImages: [String: NSImage] = [:]
+    private(set) var recentSchemeDescriptors: [String: SchemeDescriptor] = [:]
+    private(set) var recentSchemeIconImages: [String: NSImage] = [:]
 
     @ObservationIgnored var onChange: (() -> Void)?
     private let client: XcodeClient
     private let recentsStore: RecentProjectsPersisting
     private let selectionStore: SelectionStore
+    private let schemeIconProvider: SchemeIconProvider
     private var operation: Task<Void, Never>?
+    private var schemeIconOperation: Task<Void, Never>?
+    private var recentSchemeIconOperation: Task<Void, Never>?
     private var launchContext: LaunchContext?
 
     init(
         client: XcodeClient,
         recentsStore: RecentProjectsPersisting,
-        selectionStore: SelectionStore
+        selectionStore: SelectionStore,
+        schemeIconProvider: SchemeIconProvider
     ) {
         self.client = client
         self.recentsStore = recentsStore
         self.selectionStore = selectionStore
+        self.schemeIconProvider = schemeIconProvider
         let loadedProjects = recentsStore.load()
         let existingProjects = loadedProjects.filter {
             FileManager.default.fileExists(atPath: $0.url.path)
@@ -41,13 +49,15 @@ final class AppStore {
         if recentProjects != loadedProjects {
             recentsStore.save(recentProjects)
         }
+        refreshRecentSchemeIcons()
     }
 
     convenience init() {
         self.init(
             client: XcodeClient(),
             recentsStore: UserDefaultsRecentProjectsStore(),
-            selectionStore: SelectionStore()
+            selectionStore: SelectionStore(),
+            schemeIconProvider: SchemeIconProvider()
         )
     }
 
@@ -58,6 +68,18 @@ final class AppStore {
     var selectedSchemeDescriptor: SchemeDescriptor? {
         guard let selectedScheme else { return nil }
         return schemeDescriptors.first { $0.name == selectedScheme }
+    }
+
+    func schemeIcon(for descriptor: SchemeDescriptor) -> NSImage? {
+        schemeIconImages[descriptor.id]
+    }
+
+    func recentSchemeDescriptor(for project: XcodeProject) -> SchemeDescriptor? {
+        recentSchemeDescriptors[project.id]
+    }
+
+    func recentSchemeIcon(for project: XcodeProject) -> NSImage? {
+        recentSchemeIconImages[project.id]
     }
 
     var destinationGroups: [RunDestinationGroup] {
@@ -111,6 +133,7 @@ final class AppStore {
         let localSchemes = localSchemeDescriptors.map(\.name)
         schemes = localSchemes
         schemeDescriptors = localSchemeDescriptors
+        refreshSchemeIcons(for: project, descriptors: localSchemeDescriptors)
         destinations = []
         selectedScheme = savedScheme.flatMap { localSchemes.contains($0) ? $0 : nil }
             ?? (localSchemes.count == 1 ? localSchemes[0] : nil)
@@ -141,6 +164,7 @@ final class AppStore {
                     localDescriptorsByName[name]
                         ?? SchemeDescriptor(name: name, productName: nil, productKind: .other)
                 }
+                refreshSchemeIcons(for: project, descriptors: schemeDescriptors)
                 if let savedScheme, discoveredSchemes.contains(savedScheme) {
                     selectedScheme = savedScheme
                 } else if discoveredSchemes.count == 1 {
@@ -173,6 +197,7 @@ final class AppStore {
                     rememberDestination(selectedDestination)
                 }
                 persistSelection()
+                refreshRecentSchemeIcons()
                 notifyChange()
             } catch {
                 guard !Task.isCancelled else { return }
@@ -185,6 +210,9 @@ final class AppStore {
 
     func clearRecents() {
         recentProjects = []
+        recentSchemeDescriptors = [:]
+        recentSchemeIconImages = [:]
+        recentSchemeIconOperation?.cancel()
         recentsStore.save([])
         notifyChange()
     }
@@ -197,6 +225,7 @@ final class AppStore {
             selectionStore.recentDestinationIDs(for: $0, scheme: scheme)
         } ?? []
         persistSelection()
+        refreshRecentSchemeIcons()
         notifyChange()
         refreshDestinations()
     }
@@ -296,7 +325,53 @@ final class AppStore {
         recentProjects.insert(project, at: 0)
         recentProjects = RecentProjectsPolicy.limited(recentProjects)
         recentsStore.save(recentProjects)
+        refreshRecentSchemeIcons()
         notifyChange()
+    }
+
+    private func refreshSchemeIcons(
+        for project: XcodeProject,
+        descriptors: [SchemeDescriptor]
+    ) {
+        schemeIconOperation?.cancel()
+        schemeIconImages = [:]
+        schemeIconOperation = Task { [weak self] in
+            guard let self else { return }
+            for descriptor in descriptors {
+                guard !Task.isCancelled, self.project == project else { return }
+                if let image = await schemeIconProvider.image(for: descriptor, in: project) {
+                    schemeIconImages[descriptor.id] = image
+                }
+            }
+        }
+    }
+
+    private func refreshRecentSchemeIcons() {
+        recentSchemeIconOperation?.cancel()
+        recentSchemeIconImages = [:]
+
+        let presentations = recentProjects.compactMap { project -> (XcodeProject, SchemeDescriptor)? in
+            let descriptors = XcodeOutputParser.localSchemeDescriptors(in: project)
+            let descriptor = RecentSchemePolicy.descriptor(
+                savedScheme: selectionStore.scheme(for: project),
+                availableDescriptors: descriptors
+            )
+            return descriptor.map { (project, $0) }
+        }
+        recentSchemeDescriptors = Dictionary(
+            uniqueKeysWithValues: presentations.map { ($0.0.id, $0.1) }
+        )
+
+        recentSchemeIconOperation = Task { [weak self] in
+            guard let self else { return }
+            for (project, descriptor) in presentations {
+                guard !Task.isCancelled,
+                      recentProjects.contains(where: { $0.id == project.id }) else { return }
+                if let image = await schemeIconProvider.image(for: descriptor, in: project) {
+                    recentSchemeIconImages[project.id] = image
+                }
+            }
+        }
     }
 
     private func persistSelection() {

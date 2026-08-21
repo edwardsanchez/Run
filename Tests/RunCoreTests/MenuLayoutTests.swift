@@ -45,6 +45,13 @@ struct MenuLayoutTests {
         #expect(MenuLayout.shouldOpenPicker(itemCount: 2))
     }
 
+    @Test func pickerHoverAppearsOnlyForClickableHoveredSegments() {
+        #expect(MenuLayout.pickerHoverOpacity(isClickable: true, isHovered: true) == 0.1)
+        #expect(MenuLayout.pickerHoverOpacity(isClickable: true, isHovered: false) == 0)
+        #expect(MenuLayout.pickerHoverOpacity(isClickable: false, isHovered: true) == 0)
+        #expect(MenuLayout.pickerHoverOpacity(isClickable: false, isHovered: false) == 0)
+    }
+
     @Test func runControlShowsBuildProgressUntilStopIsDeliberatelyRevealed() {
         #expect(MenuLayout.runControlPresentation(
             phase: .building,

@@ -41,6 +41,10 @@ enum MenuLayout {
         itemCount > 1
     }
 
+    static func pickerHoverOpacity(isClickable: Bool, isHovered: Bool) -> Double {
+        isClickable && isHovered ? 0.1 : 0
+    }
+
     static func projectOpenUsesConcentricTopCorners(showsDivider: Bool) -> Bool {
         !showsDivider
     }

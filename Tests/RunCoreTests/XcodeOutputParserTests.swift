@@ -85,6 +85,7 @@ struct XcodeOutputParserTests {
         #expect(descriptor.productName == "Demo.app")
         #expect(descriptor.productKind == .app)
         #expect(descriptor.symbolName == "app")
+        #expect(descriptor.usesAppIconFallback)
         #expect(XcodeOutputParser.preferredScheme(in: project, availableSchemes: ["Demo"]) == "Demo")
     }
 

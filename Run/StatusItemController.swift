@@ -199,6 +199,8 @@ struct MenuBarPopoverView: View {
     @State private var showsClearRecentsConfirmation = false
     @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
     @State private var recentsContentHeight: CGFloat = 0
+    @State private var isSchemePickerHovered = false
+    @State private var isDestinationPickerHovered = false
     @FocusState private var isMenuFocused: Bool
 
     var body: some View {
@@ -297,8 +299,12 @@ struct MenuBarPopoverView: View {
     private var recentsAccordion: some View {
         VStack(spacing: 0) {
             ForEach(Array(store.recentProjects.enumerated()), id: \.element.id) { index, project in
+                let descriptor = store.recentSchemeDescriptor(for: project)
                 MenuActionRow(
                     title: project.name,
+                    leadingIconImage: store.recentSchemeIcon(for: project),
+                    leadingSymbolName: descriptor?.symbolName ?? "app",
+                    usesAppIconFallback: descriptor?.usesAppIconFallback ?? true,
                     trailingSymbol: MenuLayout.recentProjectTrailingSymbol,
                     contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
                     isHighlighted: menuSelection.selectedID == .recent(project.id),
@@ -475,13 +481,23 @@ struct MenuBarPopoverView: View {
             } label: {
                 PathSegmentLabel(
                     title: store.selectedScheme ?? loadingSchemeTitle,
+                    iconImage: store.selectedSchemeDescriptor.flatMap(store.schemeIcon(for:)),
                     symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape",
-                    showsMenuIndicator: true
+                    usesAppIconFallback: store.selectedSchemeDescriptor?.usesAppIconFallback ?? false,
+                    showsMenuIndicator: true,
+                    isHovered: isSchemePickerHovered,
+                    isClickable: !store.phase.isActive
                 )
             }
             .buttonStyle(.plain)
             .disabled(store.phase.isActive)
             .frame(maxWidth: .infinity)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active: isSchemePickerHovered = true
+                case .ended: isSchemePickerHovered = false
+                }
+            }
             .accessibilityLabel("Scheme")
             .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
             .popover(isPresented: $showsSchemePicker, arrowEdge: .top) {
@@ -490,8 +506,12 @@ struct MenuBarPopoverView: View {
         } else {
             PathSegmentLabel(
                 title: store.selectedScheme ?? loadingSchemeTitle,
+                iconImage: store.selectedSchemeDescriptor.flatMap(store.schemeIcon(for:)),
                 symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape",
-                showsMenuIndicator: false
+                usesAppIconFallback: store.selectedSchemeDescriptor?.usesAppIconFallback ?? false,
+                showsMenuIndicator: false,
+                isHovered: false,
+                isClickable: false
             )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Scheme")
@@ -508,12 +528,20 @@ struct MenuBarPopoverView: View {
                 PathSegmentLabel(
                     title: store.selectedDestination?.name ?? loadingDestinationTitle,
                     symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer",
-                    showsMenuIndicator: true
+                    showsMenuIndicator: true,
+                    isHovered: isDestinationPickerHovered,
+                    isClickable: !store.phase.isActive
                 )
             }
             .buttonStyle(.plain)
             .disabled(store.phase.isActive)
             .frame(maxWidth: .infinity)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active: isDestinationPickerHovered = true
+                case .ended: isDestinationPickerHovered = false
+                }
+            }
             .accessibilityLabel("Run Destination")
             .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
             .popover(isPresented: $showsDestinationPicker, arrowEdge: .top) {
@@ -523,7 +551,9 @@ struct MenuBarPopoverView: View {
             PathSegmentLabel(
                 title: store.selectedDestination?.name ?? loadingDestinationTitle,
                 symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer",
-                showsMenuIndicator: false
+                showsMenuIndicator: false,
+                isHovered: false,
+                isClickable: false
             )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Run Destination")
@@ -578,7 +608,7 @@ private struct SchemePickerPopover: View {
     var body: some View {
         VStack(spacing: 0) {
             if showsFilter {
-                HighLevelFilterField(
+                FilterField(
                     text: $query,
                     isFocused: $isFilterFocused,
                     handleKey: handleKeyPress
@@ -593,7 +623,9 @@ private struct SchemePickerPopover: View {
                         ForEach(filteredSchemes) { scheme in
                             PickerSelectionRow(
                                 title: scheme.name,
+                                iconImage: store.schemeIcon(for: scheme),
                                 symbolName: scheme.symbolName,
+                                usesAppIconFallback: scheme.usesAppIconFallback,
                                 version: nil,
                                 connectionSymbol: nil,
                                 isSelected: scheme.name == store.selectedScheme,
@@ -717,7 +749,7 @@ private struct RunDestinationPickerPopover: View {
     var body: some View {
         VStack(spacing: 0) {
             if showsFilter {
-                HighLevelFilterField(
+                FilterField(
                     text: $query,
                     isFocused: $isFilterFocused,
                     handleKey: handleKeyPress
@@ -881,7 +913,9 @@ private struct RunDestinationPickerPopover: View {
 
 private struct PickerSelectionRow: View {
     let title: String
+    var iconImage: NSImage? = nil
     let symbolName: String
+    var usesAppIconFallback = false
     let version: String?
     let connectionSymbol: String?
     let isSelected: Bool
@@ -899,9 +933,12 @@ private struct PickerSelectionRow: View {
                     .opacity(isSelected ? 1 : 0)
                     .frame(width: 12)
 
-                Image(systemName: symbolName)
-                    .font(.system(size: 13))
-                    .symbolRenderingMode(.hierarchical)
+                PickerIconView(
+                    image: iconImage,
+                    symbolName: symbolName,
+                    usesAppIconFallback: usesAppIconFallback,
+                    color: isActive ? .white : .blue
+                )
                     .frame(width: 16, height: 16)
                     .padding(.leading, 2)
 
@@ -972,7 +1009,7 @@ private struct PickerSelectionRow: View {
     }
 }
 
-private struct HighLevelFilterField: View {
+private struct FilterField: View {
     @Binding var text: String
     @FocusState.Binding var isFocused: Bool
     let handleKey: (KeyEquivalent) -> KeyPress.Result
@@ -999,15 +1036,21 @@ private struct HighLevelFilterField: View {
 
 private struct PathSegmentLabel: View {
     let title: String
+    var iconImage: NSImage? = nil
     let symbolName: String
+    var usesAppIconFallback = false
     let showsMenuIndicator: Bool
+    let isHovered: Bool
+    let isClickable: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: symbolName)
-                .font(.system(size: 13))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.blue)
+            PickerIconView(
+                image: iconImage,
+                symbolName: symbolName,
+                usesAppIconFallback: usesAppIconFallback,
+                color: .secondary
+            )
             Text(title)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -1020,12 +1063,54 @@ private struct PathSegmentLabel: View {
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 29)
+        .background(
+            Color.primary.opacity(
+                MenuLayout.pickerHoverOpacity(
+                    isClickable: isClickable,
+                    isHovered: isHovered
+                )
+            ),
+            in: .rect(cornerRadius: 5)
+        )
         .contentShape(.rect)
+    }
+}
+
+private struct PickerIconView: View {
+    let image: NSImage?
+    let symbolName: String
+    let usesAppIconFallback: Bool
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else if usesAppIconFallback {
+                Image("AppFallback")
+                    .font(.system(size: 13))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(color)
+            } else {
+                Image(systemName: symbolName)
+                    .font(.system(size: 13))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(color)
+            }
+        }
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
     }
 }
 
 private struct MenuActionRow: View {
     let title: String
+    var leadingIconImage: NSImage? = nil
+    var leadingSymbolName: String? = nil
+    var usesAppIconFallback = false
     var trailingSymbol: String?
     var trailingSymbolRotation = 0.0
     var contentLeadingIndent = 0.0
@@ -1039,8 +1124,20 @@ private struct MenuActionRow: View {
 
     var body: some View {
         Button(role: role, action: action) {
-            HStack {
-                Text(title)
+            HStack(spacing: 0) {
+                if leadingIconImage != nil || leadingSymbolName != nil {
+                    PickerIconView(
+                        image: leadingIconImage,
+                        symbolName: leadingSymbolName ?? "app",
+                        usesAppIconFallback: usesAppIconFallback,
+                        color: isActive ? .white : .blue
+                    )
+
+                    Text(title)
+                        .padding(.leading, 6)
+                } else {
+                    Text(title)
+                }
                 Spacer()
                 if let trailingSymbol {
                     Image(systemName: trailingSymbol)
