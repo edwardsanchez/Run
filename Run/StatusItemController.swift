@@ -201,6 +201,7 @@ struct MenuBarPopoverView: View {
     @State private var recentsContentHeight: CGFloat = 0
     @State private var isSchemePickerHovered = false
     @State private var isDestinationPickerHovered = false
+    @State private var keyboardFocus = MenuKeyboardFocusState()
     @FocusState private var isMenuFocused: Bool
 
     var body: some View {
@@ -232,6 +233,7 @@ struct MenuBarPopoverView: View {
             ProjectOpenRow(
                 showsDivider: store.project != nil,
                 isHighlighted: menuSelection.selectedID == .open,
+                isSelectionFocused: keyboardFocus.isMainMenuFocused,
                 onMouseActivity: { trackMouse($0, over: .open) }
             ) {
                 store.chooseProject()
@@ -245,6 +247,7 @@ struct MenuBarPopoverView: View {
                     trailingSymbol: "chevron.right",
                     trailingSymbolRotation: recentsState.chevronRotation,
                     isHighlighted: menuSelection.selectedID == .recents,
+                    isSelectionFocused: keyboardFocus.isMainMenuFocused,
                     onMouseActivity: { trackMouse($0, over: .recents) }
                 ) {
                     toggleRecents()
@@ -259,6 +262,7 @@ struct MenuBarPopoverView: View {
             MenuActionRow(
                 title: "Quit",
                 isHighlighted: menuSelection.selectedID == .quit,
+                isSelectionFocused: keyboardFocus.isMainMenuFocused,
                 usesConcentricBottomCorners: true,
                 onMouseActivity: { trackMouse($0, over: .quit) }
             ) {
@@ -268,11 +272,26 @@ struct MenuBarPopoverView: View {
         .padding(.vertical, 7)
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
-        .focusable()
+        .focusable(keyboardFocus.isMainMenuFocused)
         .focused($isMenuFocused)
         .focusEffectDisabled()
         .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow, .return]) { press in
             handleMenuKeyPress(press.key)
+        }
+        .background {
+            if keyboardFocus.isMainMenuFocused {
+                MenuKeyboardFocusView(
+                    claimsFirstResponder: true,
+                    handleKey: handleMenuKeyPress
+                )
+                .frame(width: 1, height: 1)
+            }
+        }
+        .onAppear {
+            recentsState.reconcileDefaultExpansion(
+                itemCount: store.recentProjects.count,
+                projectIsOpen: store.project != nil
+            )
         }
         .onChange(of: store.recentProjects.count) { _, count in
             recentsState.reconcile(itemCount: count)
@@ -281,6 +300,23 @@ struct MenuBarPopoverView: View {
                     menuSelection.selectFromKeyboard(nil)
                 }
             }
+        }
+        .onChange(of: store.project) { _, project in
+            withAnimation(.easeInOut(duration: 0.18)) {
+                recentsState.reconcileDefaultExpansion(
+                    itemCount: store.recentProjects.count,
+                    projectIsOpen: project != nil
+                )
+            }
+            if !recentsState.isExpanded, case .recent = menuSelection.selectedID {
+                menuSelection.selectFromKeyboard(nil)
+            }
+        }
+        .onChange(of: showsSchemePicker) { _, isPresented in
+            updateKeyboardFocus(for: .schemePicker, isPresented: isPresented)
+        }
+        .onChange(of: showsDestinationPicker) { _, isPresented in
+            updateKeyboardFocus(for: .destinationPicker, isPresented: isPresented)
         }
         .alert("Clear Recents?", isPresented: $showsClearRecentsConfirmation) {
             Button("Clear", role: .destructive) {
@@ -308,6 +344,7 @@ struct MenuBarPopoverView: View {
                     trailingSymbol: MenuLayout.recentProjectTrailingSymbol,
                     contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
                     isHighlighted: menuSelection.selectedID == .recent(project.id),
+                    isSelectionFocused: keyboardFocus.isMainMenuFocused,
                     onMouseActivity: { trackMouse($0, over: .recent(project.id)) }
                 ) {
                     chooseRecent(at: index)
@@ -323,6 +360,7 @@ struct MenuBarPopoverView: View {
                 title: "Clear Recents…",
                 contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
                 isHighlighted: menuSelection.selectedID == .clearRecents,
+                isSelectionFocused: keyboardFocus.isMainMenuFocused,
                 role: .destructive,
                 onMouseActivity: { trackMouse($0, over: .clearRecents) }
             ) {
@@ -447,6 +485,44 @@ struct MenuBarPopoverView: View {
         isMenuFocused = true
     }
 
+    private func updateKeyboardFocus(
+        for picker: MenuKeyboardFocusOwner,
+        isPresented: Bool
+    ) {
+        if isPresented {
+            return
+        } else {
+            keyboardFocus.dismiss(picker)
+            guard keyboardFocus.isMainMenuFocused else { return }
+            Task {
+                await Task.yield()
+                isMenuFocused = true
+            }
+        }
+    }
+
+    private func toggleSchemePicker() {
+        showsDestinationPicker = false
+        if showsSchemePicker {
+            showsSchemePicker = false
+        } else {
+            keyboardFocus.present(.schemePicker)
+            isMenuFocused = false
+            showsSchemePicker = true
+        }
+    }
+
+    private func toggleDestinationPicker() {
+        showsSchemePicker = false
+        if showsDestinationPicker {
+            showsDestinationPicker = false
+        } else {
+            keyboardFocus.present(.destinationPicker)
+            isMenuFocused = false
+            showsDestinationPicker = true
+        }
+    }
+
     private func chooseRecent(at index: Int) {
         guard store.recentProjects.indices.contains(index) else { return }
         let project = store.recentProjects[index]
@@ -476,9 +552,7 @@ struct MenuBarPopoverView: View {
     @ViewBuilder
     private var schemePickerButton: some View {
         if MenuLayout.shouldOpenPicker(itemCount: store.schemeDescriptors.count) {
-            Button {
-                showsSchemePicker.toggle()
-            } label: {
+            Button(action: toggleSchemePicker) {
                 PathSegmentLabel(
                     title: store.selectedScheme ?? loadingSchemeTitle,
                     iconImage: store.selectedSchemeDescriptor.flatMap(store.schemeIcon(for:)),
@@ -522,9 +596,7 @@ struct MenuBarPopoverView: View {
     @ViewBuilder
     private var destinationPickerButton: some View {
         if MenuLayout.shouldOpenPicker(itemCount: store.visibleDestinations.count) {
-            Button {
-                showsDestinationPicker.toggle()
-            } label: {
+            Button(action: toggleDestinationPicker) {
                 PathSegmentLabel(
                     title: store.selectedDestination?.name ?? loadingDestinationTitle,
                     symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer",
@@ -573,6 +645,7 @@ struct MenuBarPopoverView: View {
 private struct ProjectOpenRow: View {
     let showsDivider: Bool
     var isHighlighted = false
+    var isSelectionFocused = true
     var onMouseActivity: ((Bool) -> Void)?
     let action: () -> Void
 
@@ -586,6 +659,7 @@ private struct ProjectOpenRow: View {
             MenuActionRow(
                 title: "Open…",
                 isHighlighted: isHighlighted,
+                isSelectionFocused: isSelectionFocused,
                 usesConcentricTopCorners: MenuLayout.projectOpenUsesConcentricTopCorners(
                     showsDivider: showsDivider
                 ),
@@ -603,7 +677,6 @@ private struct SchemePickerPopover: View {
     @State private var selection = MenuSelectionState<String>()
     @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
     @FocusState private var isFilterFocused: Bool
-    @FocusState private var isListFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -631,6 +704,10 @@ private struct SchemePickerPopover: View {
                                 isSelected: scheme.name == store.selectedScheme,
                                 isHighlighted: scheme.name == selection.selectedID,
                                 isEnabled: true,
+                                usesConcentricTopCorners: !showsFilter && MenuLayout.isTopItem(
+                                    scheme.id,
+                                    firstID: filteredSchemes.first?.id
+                                ),
                                 usesConcentricBottomCorners: MenuLayout.isBottomItem(
                                     scheme.id,
                                     lastID: filteredSchemes.last?.id
@@ -645,12 +722,6 @@ private struct SchemePickerPopover: View {
                     .padding(.vertical, 4)
                 }
                 .frame(height: MenuLayout.schemePickerListHeight(itemCount: filteredSchemes.count))
-                .focusable(!showsFilter)
-                .focused($isListFocused)
-                .focusEffectDisabled()
-                .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
-                    handleKeyPress(press.key)
-                }
                 .onChange(of: selection.selectedID) { _, name in
                     if let name {
                         proxy.scrollTo(name, anchor: .center)
@@ -659,14 +730,20 @@ private struct SchemePickerPopover: View {
             }
         }
         .frame(width: 320)
+        .defaultFocus($isFilterFocused, showsFilter)
+        .background {
+            MenuKeyboardFocusView(
+                claimsFirstResponder: !showsFilter,
+                handleKey: handleKeyPress
+            )
+            .frame(width: 1, height: 1)
+        }
         .onAppear {
             selection.selectFromKeyboard(store.selectedScheme ?? filteredSchemes.first?.name)
-            Task {
-                await Task.yield()
-                if showsFilter {
+            if showsFilter {
+                Task {
+                    await Task.yield()
                     isFilterFocused = true
-                } else {
-                    isListFocused = true
                 }
             }
         }
@@ -744,7 +821,6 @@ private struct RunDestinationPickerPopover: View {
     @State private var selection = MenuSelectionState<String>()
     @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
     @FocusState private var isFilterFocused: Bool
-    @FocusState private var isListFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -803,12 +879,6 @@ private struct RunDestinationPickerPopover: View {
                         itemCount: filteredGroups.reduce(0) { $0 + $1.destinations.count }
                     )
                 )
-                .focusable(!showsFilter)
-                .focused($isListFocused)
-                .focusEffectDisabled()
-                .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
-                    handleKeyPress(press.key)
-                }
                 .onChange(of: selection.selectedID) { _, identifier in
                     if let identifier {
                         proxy.scrollTo(identifier, anchor: .center)
@@ -817,16 +887,22 @@ private struct RunDestinationPickerPopover: View {
             }
         }
         .frame(width: 430)
+        .defaultFocus($isFilterFocused, showsFilter)
+        .background {
+            MenuKeyboardFocusView(
+                claimsFirstResponder: !showsFilter,
+                handleKey: handleKeyPress
+            )
+            .frame(width: 1, height: 1)
+        }
         .onAppear {
             selection.selectFromKeyboard(
                 store.selectedDestination?.id ?? selectableDestinations.first?.id
             )
-            Task {
-                await Task.yield()
-                if showsFilter {
+            if showsFilter {
+                Task {
+                    await Task.yield()
                     isFilterFocused = true
-                } else {
-                    isListFocused = true
                 }
             }
         }
@@ -921,6 +997,7 @@ private struct PickerSelectionRow: View {
     let isSelected: Bool
     var isHighlighted = false
     let isEnabled: Bool
+    var usesConcentricTopCorners = false
     var usesConcentricBottomCorners = false
     var onMouseActivity: ((Bool) -> Void)?
     let action: () -> Void
@@ -993,19 +1070,141 @@ private struct PickerSelectionRow: View {
     @ViewBuilder
     private var rowBackground: some View {
         let color = isActive && isEnabled ? Color.accentColor : Color.clear
-        if usesConcentricBottomCorners {
+        if usesConcentricTopCorners || usesConcentricBottomCorners {
+            let concentricCorner = Edge.Corner.Style.concentric(
+                minimum: .fixed(MenuLayout.minimumConcentricCornerRadius)
+            )
             ConcentricRectangle(
-                uniformBottomCorners: .concentric(
-                    minimum: .fixed(MenuLayout.minimumConcentricCornerRadius)
-                ),
-                topLeadingCorner: .fixed(5),
-                topTrailingCorner: .fixed(5)
+                uniformTopCorners: usesConcentricTopCorners ? concentricCorner : .fixed(5),
+                uniformBottomCorners: usesConcentricBottomCorners ? concentricCorner : .fixed(5)
             )
             .fill(color)
         } else {
             RoundedRectangle(cornerRadius: 5)
                 .fill(color)
         }
+    }
+}
+
+private struct MenuKeyboardFocusView: NSViewRepresentable {
+    let claimsFirstResponder: Bool
+    let handleKey: (KeyEquivalent) -> KeyPress.Result
+
+    func makeNSView(context: Context) -> MenuKeyboardFocusNSView {
+        MenuKeyboardFocusNSView(
+            claimsFirstResponder: claimsFirstResponder,
+            handleKey: handleKey
+        )
+    }
+
+    func updateNSView(_ view: MenuKeyboardFocusNSView, context: Context) {
+        view.claimsFirstResponder = claimsFirstResponder
+        view.handleKey = handleKey
+        if claimsFirstResponder {
+            view.scheduleFirstResponderClaim()
+        }
+    }
+
+    static func dismantleNSView(_ view: MenuKeyboardFocusNSView, coordinator: ()) {
+        view.tearDown()
+    }
+}
+
+private final class MenuKeyboardFocusNSView: NSView {
+    var claimsFirstResponder: Bool
+    var handleKey: (KeyEquivalent) -> KeyPress.Result
+    private var keyMonitor: Any?
+
+    init(
+        claimsFirstResponder: Bool,
+        handleKey: @escaping (KeyEquivalent) -> KeyPress.Result
+    ) {
+        self.claimsFirstResponder = claimsFirstResponder
+        self.handleKey = handleKey
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var acceptsFirstResponder: Bool { claimsFirstResponder }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        removeKeyMonitor()
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowDidBecomeKey),
+                name: NSWindow.didBecomeKeyNotification,
+                object: window
+            )
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self else { return event }
+                return self.handle(event) ? nil : event
+            }
+        }
+        if claimsFirstResponder {
+            scheduleFirstResponderClaim()
+        }
+    }
+
+    @objc private func windowDidBecomeKey() {
+        scheduleFirstResponderClaim()
+    }
+
+    func scheduleFirstResponderClaim() {
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            await Task.yield()
+            guard let self, self.claimsFirstResponder,
+                  let window, window.firstResponder !== self else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !handle(event) {
+            super.keyDown(with: event)
+        }
+    }
+
+    private func handle(_ event: NSEvent) -> Bool {
+        let key: KeyEquivalent
+        switch event.keyCode {
+        case 123:
+            key = .leftArrow
+        case 124:
+            key = .rightArrow
+        case 125:
+            key = .downArrow
+        case 126:
+            key = .upArrow
+        case 36, 76:
+            key = .return
+        default:
+            return false
+        }
+
+        return handleKey(key) == .handled
+    }
+
+    private func removeKeyMonitor() {
+        guard let keyMonitor else { return }
+        NSEvent.removeMonitor(keyMonitor)
+        self.keyMonitor = nil
+    }
+
+    func tearDown() {
+        removeKeyMonitor()
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
@@ -1116,6 +1315,7 @@ private struct MenuActionRow: View {
     var contentLeadingIndent = 0.0
     var isEnabled = true
     var isHighlighted = false
+    var isSelectionFocused = true
     var usesConcentricTopCorners = false
     var usesConcentricBottomCorners = false
     var role: ButtonRole?
@@ -1130,7 +1330,7 @@ private struct MenuActionRow: View {
                         image: leadingIconImage,
                         symbolName: leadingSymbolName ?? "app",
                         usesAppIconFallback: usesAppIconFallback,
-                        color: isActive ? .white : .blue
+                        color: isFocusedSelection ? .white : .blue
                     )
 
                     Text(title)
@@ -1169,7 +1369,7 @@ private struct MenuActionRow: View {
 
     @ViewBuilder
     private var rowBackground: some View {
-        let color = isActive && isEnabled ? Color.accentColor : Color.clear
+        let color = selectionBackground
         if usesConcentricTopCorners || usesConcentricBottomCorners {
             ConcentricRectangle(
                 uniformTopCorners: usesConcentricTopCorners ? concentricCorner : .fixed(5),
@@ -1188,9 +1388,18 @@ private struct MenuActionRow: View {
 
     private var rowForeground: Color {
         guard isEnabled else { return .secondary }
-        if isActive { return .white }
+        if isFocusedSelection { return .white }
         return role == .destructive ? .red : .primary
     }
 
-    private var isActive: Bool { isHighlighted }
+    private var isFocusedSelection: Bool {
+        isHighlighted && isSelectionFocused
+    }
+
+    private var selectionBackground: Color {
+        guard isHighlighted, isEnabled else { return .clear }
+        return isSelectionFocused
+            ? .accentColor
+            : .primary.opacity(MenuLayout.unfocusedSelectionOpacity)
+    }
 }

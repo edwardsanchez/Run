@@ -14,6 +14,7 @@ enum MenuLayout {
     static let nestedMenuItemContentLeadingIndent = 14.0
     static let recentProjectTrailingSymbol: String? = nil
     static let filterMinimumItemCount = 6
+    static let unfocusedSelectionOpacity = 0.1
     static let recentsChevronCollapsedRotation = 0.0
     static let recentsChevronExpandedRotation = 90.0
 
@@ -73,6 +74,30 @@ enum MenuLayout {
     }
 }
 
+enum MenuKeyboardFocusOwner: Equatable {
+    case mainMenu
+    case schemePicker
+    case destinationPicker
+}
+
+struct MenuKeyboardFocusState: Equatable {
+    private(set) var owner: MenuKeyboardFocusOwner = .mainMenu
+
+    mutating func present(_ picker: MenuKeyboardFocusOwner) {
+        guard picker != .mainMenu else { return }
+        owner = picker
+    }
+
+    mutating func dismiss(_ picker: MenuKeyboardFocusOwner) {
+        guard owner == picker else { return }
+        owner = .mainMenu
+    }
+
+    var isMainMenuFocused: Bool {
+        owner == .mainMenu
+    }
+}
+
 struct RecentsAccordionState: Equatable {
     private(set) var isExpanded = false
 
@@ -105,6 +130,14 @@ struct RecentsAccordionState: Equatable {
         guard itemCount > 0 else {
             collapse()
             return
+        }
+    }
+
+    mutating func reconcileDefaultExpansion(itemCount: Int, projectIsOpen: Bool) {
+        if itemCount > 0 && !projectIsOpen {
+            expand(itemCount: itemCount)
+        } else {
+            collapse()
         }
     }
 

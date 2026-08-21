@@ -52,6 +52,24 @@ struct MenuLayoutTests {
         #expect(MenuLayout.pickerHoverOpacity(isClickable: false, isHovered: false) == 0)
     }
 
+    @Test func pickerPresentationTransfersAndRestoresKeyboardFocus() {
+        var focus = MenuKeyboardFocusState()
+        #expect(focus.owner == .mainMenu)
+        #expect(focus.isMainMenuFocused)
+
+        focus.present(.schemePicker)
+        #expect(focus.owner == .schemePicker)
+        #expect(!focus.isMainMenuFocused)
+
+        focus.present(.destinationPicker)
+        focus.dismiss(.schemePicker)
+        #expect(focus.owner == .destinationPicker)
+
+        focus.dismiss(.destinationPicker)
+        #expect(focus.owner == .mainMenu)
+        #expect(focus.isMainMenuFocused)
+    }
+
     @Test func runControlShowsBuildProgressUntilStopIsDeliberatelyRevealed() {
         #expect(MenuLayout.runControlPresentation(
             phase: .building,
@@ -162,6 +180,19 @@ struct MenuLayoutTests {
 
         state.expand(itemCount: 2)
         state.reconcile(itemCount: 0)
+        #expect(!state.isExpanded)
+    }
+
+    @Test func recentsDefaultOpenOnlyWhenNoProjectIsOpenAndItemsExist() {
+        var state = RecentsAccordionState()
+
+        state.reconcileDefaultExpansion(itemCount: 2, projectIsOpen: false)
+        #expect(state.isExpanded)
+
+        state.reconcileDefaultExpansion(itemCount: 2, projectIsOpen: true)
+        #expect(!state.isExpanded)
+
+        state.reconcileDefaultExpansion(itemCount: 0, projectIsOpen: false)
         #expect(!state.isExpanded)
     }
 }
