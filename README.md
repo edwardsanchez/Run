@@ -39,3 +39,7 @@ Run reproduces the common build-install-launch path with public command-line too
 - Device launches still depend on Xcode's command-line device support and the project's signing configuration. A destination that appears in the menu may remain unavailable until Xcode's setup requirements are satisfied.
 
 When Run cannot identify a launchable app or cannot faithfully handle a scheme's Run action, it reports an error instead of launching a different product.
+
+## License
+
+Run is available under the [MIT License](LICENSE).
