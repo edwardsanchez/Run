@@ -299,7 +299,7 @@ struct MenuBarPopoverView: View {
             ForEach(Array(store.recentProjects.enumerated()), id: \.element.id) { index, project in
                 MenuActionRow(
                     title: project.name,
-                    trailingSymbol: "hammer",
+                    trailingSymbol: MenuLayout.recentProjectTrailingSymbol,
                     contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
                     isHighlighted: menuSelection.selectedID == .recent(project.id),
                     onMouseActivity: { trackMouse($0, over: .recent(project.id)) }

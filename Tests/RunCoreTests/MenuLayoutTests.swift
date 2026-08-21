@@ -20,6 +20,7 @@ struct MenuLayoutTests {
         #expect(!MenuLayout.isBottomItem("first", lastID: "last"))
         #expect(!MenuLayout.isBottomItem("only", lastID: String?.none))
         #expect(MenuLayout.nestedMenuItemContentLeadingIndent > 0)
+        #expect(MenuLayout.recentProjectTrailingSymbol == nil)
     }
 
     @Test func pickerListsFitTheirResultsUntilTheyReachTheirMaximumHeight() {

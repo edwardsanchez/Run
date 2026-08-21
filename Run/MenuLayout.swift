@@ -12,6 +12,7 @@ enum MenuLayout {
     static let destinationPickerMaximumListHeight = 500.0
     static let minimumConcentricCornerRadius = menuItemHeight / 2
     static let nestedMenuItemContentLeadingIndent = 14.0
+    static let recentProjectTrailingSymbol: String? = nil
     static let filterMinimumItemCount = 6
     static let recentsChevronCollapsedRotation = 0.0
     static let recentsChevronExpandedRotation = 90.0
