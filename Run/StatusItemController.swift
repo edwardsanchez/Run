@@ -300,12 +300,12 @@ struct MenuBarPopoverView: View {
                 MenuActionRow(
                     title: project.name,
                     trailingSymbol: "hammer",
+                    contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
                     isHighlighted: menuSelection.selectedID == .recent(project.id),
                     onMouseActivity: { trackMouse($0, over: .recent(project.id)) }
                 ) {
                     chooseRecent(at: index)
                 }
-                .padding(.leading, 14)
                 .help(project.url.path)
             }
 
@@ -315,13 +315,13 @@ struct MenuBarPopoverView: View {
 
             MenuActionRow(
                 title: "Clear Recents…",
+                contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
                 isHighlighted: menuSelection.selectedID == .clearRecents,
                 role: .destructive,
                 onMouseActivity: { trackMouse($0, over: .clearRecents) }
             ) {
                 showsClearRecentsConfirmation = true
             }
-            .padding(.leading, 14)
         }
     }
 
@@ -1028,6 +1028,7 @@ private struct MenuActionRow: View {
     let title: String
     var trailingSymbol: String?
     var trailingSymbolRotation = 0.0
+    var contentLeadingIndent = 0.0
     var isEnabled = true
     var isHighlighted = false
     var usesConcentricTopCorners = false
@@ -1047,7 +1048,8 @@ private struct MenuActionRow: View {
                         .rotationEffect(.degrees(trailingSymbolRotation))
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.leading, 10 + contentLeadingIndent)
+            .padding(.trailing, 10)
             .frame(height: MenuLayout.menuItemHeight)
             .contentShape(.rect)
             .foregroundStyle(rowForeground)
