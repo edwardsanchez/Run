@@ -131,31 +131,26 @@ final class XcodeClient {
                     settings: settings,
                     configuration: launchConfiguration
                 )
-            } else if destination.isSimulator, let identifier = destination.identifier {
-                _ = try? await developerCommand("simctl", arguments: ["boot", identifier])
-                _ = try await developerCommand("simctl", arguments: ["bootstatus", identifier, "-b"])
-                _ = try await developerCommand("simctl", arguments: ["install", identifier, settings.path.path])
-                _ = try await developerCommand(
-                    "simctl",
-                    arguments: SchemeLaunchPlan.simulatorLaunchArguments(
-                        identifier: identifier,
-                        bundleIdentifier: settings.bundleIdentifier,
-                        configuration: launchConfiguration
-                    ),
-                    environment: SchemeLaunchPlan.simulatorEnvironment(for: launchConfiguration)
-                )
             } else if let identifier = destination.identifier {
-                _ = try await developerCommand("devicectl", arguments: [
-                    "device", "install", "app", "--device", identifier, settings.path.path,
-                ])
+                if destination.isSimulator {
+                    _ = try? await developerCommand("simctl", arguments: ["boot", identifier])
+                    _ = try await developerCommand("simctl", arguments: ["bootstatus", identifier, "-b"])
+                }
+                _ = try await developerCommand(
+                    "devicectl",
+                    arguments: SchemeLaunchPlan.devicectlInstallArguments(
+                        identifier: identifier,
+                        appPath: settings.path.path
+                    )
+                )
                 let launchResult = try await developerCommand(
                     "devicectl",
-                    arguments: SchemeLaunchPlan.deviceLaunchArguments(
+                    arguments: SchemeLaunchPlan.devicectlLaunchArguments(
                         identifier: identifier,
                         bundleIdentifier: settings.bundleIdentifier,
                         configuration: launchConfiguration
                     ),
-                    environment: SchemeLaunchPlan.deviceEnvironment(for: launchConfiguration)
+                    environment: SchemeLaunchPlan.devicectlEnvironment(for: launchConfiguration)
                 )
                 deviceProcessIdentifier = XcodeOutputParser.deviceProcessIdentifier(from: launchResult.standardOutput)
             }
@@ -185,15 +180,22 @@ final class XcodeClient {
             let applications = NSRunningApplication.runningApplications(withBundleIdentifier: context.bundleIdentifier)
             applications.forEach { $0.terminate() }
         } else if context.destination.isSimulator, let identifier = context.destination.identifier {
-            _ = try? await developerCommand("simctl", arguments: [
-                "terminate", identifier, context.bundleIdentifier,
-            ])
+            _ = try? await developerCommand(
+                "simctl",
+                arguments: SchemeLaunchPlan.simulatorTerminateArguments(
+                    identifier: identifier,
+                    bundleIdentifier: context.bundleIdentifier
+                )
+            )
         } else if let identifier = context.destination.identifier,
                   let processIdentifier = context.deviceProcessIdentifier {
-            _ = try? await developerCommand("devicectl", arguments: [
-                "device", "process", "terminate", "--device", identifier,
-                "--pid", String(processIdentifier),
-            ])
+            _ = try? await developerCommand(
+                "devicectl",
+                arguments: SchemeLaunchPlan.devicectlTerminateArguments(
+                    identifier: identifier,
+                    processIdentifier: processIdentifier
+                )
+            )
         }
 
         for action in context.postActions {

@@ -103,7 +103,7 @@ struct SchemeRunConfigurationTests {
         ])
     }
 
-    @Test func buildsDestinationSpecificLaunchCommandsWithoutPuttingEnvironmentInArguments() {
+    @Test func buildsDevicectlCommandsForPhysicalAndSimulatedDevicesWithoutPuttingEnvironmentInArguments() {
         let configuration = ResolvedSchemeRunConfiguration(
             buildConfiguration: "Debug",
             arguments: ["--preview", "Sample Name"],
@@ -116,31 +116,42 @@ struct SchemeRunConfigurationTests {
             enablesUndefinedBehaviorSanitizer: false
         )
 
-        #expect(SchemeLaunchPlan.simulatorLaunchArguments(
-            identifier: "SIM",
-            bundleIdentifier: "com.example.demo",
-            configuration: configuration
-        ) == [
-            "launch", "--terminate-running-process", "SIM", "com.example.demo", "--preview", "Sample Name",
-        ])
-        #expect(SchemeLaunchPlan.simulatorEnvironment(for: configuration) == [
-            "SIMCTL_CHILD_TOKEN": "private", "SIMCTL_CHILD_MODE": "preview",
-        ])
+        for identifier in ["SIMULATOR", "PHONE"] {
+            #expect(SchemeLaunchPlan.devicectlInstallArguments(
+                identifier: identifier,
+                appPath: "/tmp/Demo.app"
+            ) == [
+                "device", "install", "app", "--device", identifier, "/tmp/Demo.app",
+            ])
 
-        let deviceArguments = SchemeLaunchPlan.deviceLaunchArguments(
-            identifier: "PHONE",
-            bundleIdentifier: "com.example.demo",
-            configuration: configuration
-        )
-        #expect(deviceArguments == [
-            "device", "process", "launch", "--device", "PHONE",
-            "--terminate-existing", "--json-output", "-",
-            "--working-directory", "/tmp/Working",
-            "com.example.demo", "--preview", "Sample Name",
-        ])
-        #expect(!deviceArguments.contains("private"))
-        #expect(SchemeLaunchPlan.deviceEnvironment(for: configuration) == [
+            let launchArguments = SchemeLaunchPlan.devicectlLaunchArguments(
+                identifier: identifier,
+                bundleIdentifier: "com.example.demo",
+                configuration: configuration
+            )
+            #expect(launchArguments == [
+                "device", "process", "launch", "--device", identifier,
+                "--terminate-existing", "--json-output", "-",
+                "--working-directory", "/tmp/Working",
+                "com.example.demo", "--preview", "Sample Name",
+            ])
+            #expect(!launchArguments.contains("private"))
+        }
+        #expect(SchemeLaunchPlan.devicectlEnvironment(for: configuration) == [
             "DEVICECTL_CHILD_TOKEN": "private", "DEVICECTL_CHILD_MODE": "preview",
+        ])
+        #expect(SchemeLaunchPlan.simulatorTerminateArguments(
+            identifier: "SIMULATOR",
+            bundleIdentifier: "com.example.demo"
+        ) == [
+            "terminate", "SIMULATOR", "com.example.demo",
+        ])
+        #expect(SchemeLaunchPlan.devicectlTerminateArguments(
+            identifier: "PHONE",
+            processIdentifier: 8675
+        ) == [
+            "device", "process", "terminate", "--device", "PHONE",
+            "--pid", "8675",
         ])
     }
 

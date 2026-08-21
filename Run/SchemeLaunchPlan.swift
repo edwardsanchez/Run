@@ -45,19 +45,14 @@ enum SchemeLaunchPlan {
         return arguments
     }
 
-    static func simulatorLaunchArguments(
+    static func devicectlInstallArguments(
         identifier: String,
-        bundleIdentifier: String,
-        configuration: ResolvedSchemeRunConfiguration
+        appPath: String
     ) -> [String] {
-        ["launch", "--terminate-running-process", identifier, bundleIdentifier] + configuration.arguments
+        ["device", "install", "app", "--device", identifier, appPath]
     }
 
-    static func simulatorEnvironment(for configuration: ResolvedSchemeRunConfiguration) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: configuration.environment.map { ("SIMCTL_CHILD_" + $0.key, $0.value) })
-    }
-
-    static func deviceLaunchArguments(
+    static func devicectlLaunchArguments(
         identifier: String,
         bundleIdentifier: String,
         configuration: ResolvedSchemeRunConfiguration
@@ -72,8 +67,19 @@ enum SchemeLaunchPlan {
         return arguments + [bundleIdentifier] + configuration.arguments
     }
 
-    static func deviceEnvironment(for configuration: ResolvedSchemeRunConfiguration) -> [String: String] {
+    static func devicectlEnvironment(for configuration: ResolvedSchemeRunConfiguration) -> [String: String] {
         Dictionary(uniqueKeysWithValues: configuration.environment.map { ("DEVICECTL_CHILD_" + $0.key, $0.value) })
+    }
+
+    static func simulatorTerminateArguments(identifier: String, bundleIdentifier: String) -> [String] {
+        ["terminate", identifier, bundleIdentifier]
+    }
+
+    static func devicectlTerminateArguments(identifier: String, processIdentifier: Int) -> [String] {
+        [
+            "device", "process", "terminate", "--device", identifier,
+            "--pid", String(processIdentifier),
+        ]
     }
 
     private static func expandMacros(in source: String, values: [String: String]) -> String {
