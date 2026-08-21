@@ -42,6 +42,17 @@ struct RecentProjectsStoreTests {
         #expect(store.load().isEmpty)
     }
 
+    @Test func recentProjectsAreLimitedToFiveInMostRecentOrder() throws {
+        let projects = try (0..<7).map { index in
+            try #require(XcodeProject(url: URL(fileURLWithPath: "/tmp/Project\(index).xcodeproj")))
+        }
+
+        let limited = RecentProjectsPolicy.limited(projects)
+
+        #expect(RecentProjectsPolicy.maximumCount == 5)
+        #expect(limited == Array(projects.prefix(5)))
+    }
+
     @Test func selectedSchemeAndDestinationRoundTrip() throws {
         let suite = "RunSelections.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

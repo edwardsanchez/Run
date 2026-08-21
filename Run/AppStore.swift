@@ -33,7 +33,14 @@ final class AppStore {
         self.client = client
         self.recentsStore = recentsStore
         self.selectionStore = selectionStore
-        recentProjects = recentsStore.load().filter { FileManager.default.fileExists(atPath: $0.url.path) }
+        let loadedProjects = recentsStore.load()
+        let existingProjects = loadedProjects.filter {
+            FileManager.default.fileExists(atPath: $0.url.path)
+        }
+        recentProjects = RecentProjectsPolicy.limited(existingProjects)
+        if recentProjects != loadedProjects {
+            recentsStore.save(recentProjects)
+        }
     }
 
     convenience init() {
@@ -283,7 +290,7 @@ final class AppStore {
     private func addRecent(_ project: XcodeProject) {
         recentProjects.removeAll { $0.id == project.id }
         recentProjects.insert(project, at: 0)
-        recentProjects = Array(recentProjects.prefix(10))
+        recentProjects = RecentProjectsPolicy.limited(recentProjects)
         recentsStore.save(recentProjects)
         notifyChange()
     }

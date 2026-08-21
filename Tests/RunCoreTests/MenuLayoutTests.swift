@@ -61,4 +61,42 @@ struct MenuLayoutTests {
             canRevealBuildStop: true
         ) == .run)
     }
+
+    @Test func recentsAccordionExpandsWithFirstItemFocusedAndReversesOnSecondToggle() {
+        var state = RecentsAccordionState()
+
+        state.toggle(itemCount: 5)
+        #expect(state.isExpanded)
+        #expect(state.highlightedIndex == 0)
+        #expect(state.chevronRotation == MenuLayout.recentsChevronExpandedRotation)
+
+        state.toggle(itemCount: 5)
+        #expect(!state.isExpanded)
+        #expect(state.highlightedIndex == nil)
+        #expect(state.chevronRotation == MenuLayout.recentsChevronCollapsedRotation)
+    }
+
+    @Test func recentsAccordionKeyboardHighlightMovesWithinAvailableItems() {
+        var state = RecentsAccordionState()
+        state.expand(itemCount: 3)
+
+        state.moveHighlight(by: 1, itemCount: 3)
+        #expect(state.highlightedIndex == 1)
+        state.moveHighlight(by: 1, itemCount: 3)
+        state.moveHighlight(by: 1, itemCount: 3)
+        #expect(state.highlightedIndex == 2)
+        state.moveHighlight(by: -1, itemCount: 3)
+        #expect(state.highlightedIndex == 1)
+    }
+
+    @Test func recentsAccordionDoesNotOpenWithoutItemsAndClosesWhenItemsDisappear() {
+        var state = RecentsAccordionState()
+        state.expand(itemCount: 0)
+        #expect(!state.isExpanded)
+
+        state.expand(itemCount: 2)
+        state.reconcile(itemCount: 0)
+        #expect(!state.isExpanded)
+        #expect(state.highlightedIndex == nil)
+    }
 }

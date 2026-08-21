@@ -178,7 +178,9 @@ struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
     @State private var showsSchemePicker = false
     @State private var showsDestinationPicker = false
-    @State private var showsRecents = false
+    @State private var recentsState = RecentsAccordionState()
+    @State private var showsClearRecentsConfirmation = false
+    @FocusState private var isRecentsFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -213,11 +215,17 @@ struct MenuBarPopoverView: View {
             if store.recentProjects.isEmpty {
                 MenuActionRow(title: "No Recents", isEnabled: false) { }
             } else {
-                MenuActionRow(title: "Recents", trailingSymbol: "chevron.right") {
-                    showsRecents.toggle()
+                MenuActionRow(
+                    title: "Recents",
+                    trailingSymbol: "chevron.right",
+                    trailingSymbolRotation: recentsState.chevronRotation
+                ) {
+                    toggleRecents()
                 }
-                .popover(isPresented: $showsRecents, arrowEdge: .top) {
-                    RecentsPickerPopover(store: store, isPresented: $showsRecents)
+
+                if recentsState.isExpanded {
+                    recentsAccordion
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
 
@@ -231,6 +239,96 @@ struct MenuBarPopoverView: View {
         .padding(.vertical, 7)
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
+        .onChange(of: store.recentProjects.count) { _, count in
+            recentsState.reconcile(itemCount: count)
+            if !recentsState.isExpanded {
+                isRecentsFocused = false
+            }
+        }
+        .alert("Clear Recents?", isPresented: $showsClearRecentsConfirmation) {
+            Button("Clear", role: .destructive) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    recentsState.collapse()
+                }
+                isRecentsFocused = false
+                store.clearRecents()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes all projects from the Recents menu.")
+        }
+    }
+
+    private var recentsAccordion: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(store.recentProjects.enumerated()), id: \.element.id) { index, project in
+                MenuActionRow(
+                    title: project.name,
+                    trailingSymbol: "hammer",
+                    isHighlighted: index == recentsState.highlightedIndex
+                ) {
+                    chooseRecent(at: index)
+                }
+                .padding(.leading, 14)
+                .help(project.url.path)
+            }
+
+            Divider()
+                .padding(.leading, 14)
+                .padding(.vertical, MenuLayout.standardSeparatorSpacing)
+
+            MenuActionRow(title: "Clear Recents…", role: .destructive) {
+                showsClearRecentsConfirmation = true
+            }
+            .padding(.leading, 14)
+        }
+        .focusable()
+        .focused($isRecentsFocused)
+        .focusEffectDisabled()
+        .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
+            handleRecentsKeyPress(press.key)
+        }
+    }
+
+    private func toggleRecents() {
+        let wasExpanded = recentsState.isExpanded
+        withAnimation(.easeInOut(duration: 0.18)) {
+            recentsState.toggle(itemCount: store.recentProjects.count)
+        }
+        if wasExpanded {
+            isRecentsFocused = false
+        } else {
+            Task {
+                await Task.yield()
+                isRecentsFocused = true
+            }
+        }
+    }
+
+    private func handleRecentsKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
+        switch key {
+        case .upArrow:
+            recentsState.moveHighlight(by: -1, itemCount: store.recentProjects.count)
+        case .downArrow:
+            recentsState.moveHighlight(by: 1, itemCount: store.recentProjects.count)
+        case .return:
+            if let index = recentsState.highlightedIndex {
+                chooseRecent(at: index)
+            }
+        default:
+            return .ignored
+        }
+        return .handled
+    }
+
+    private func chooseRecent(at index: Int) {
+        guard store.recentProjects.indices.contains(index) else { return }
+        let project = store.recentProjects[index]
+        withAnimation(.easeInOut(duration: 0.18)) {
+            recentsState.collapse()
+        }
+        isRecentsFocused = false
+        store.openProject(at: project.url)
     }
 
     private var configurationMenus: some View {
@@ -666,54 +764,6 @@ private struct HighLevelFilterField: View {
     }
 }
 
-private struct RecentsPickerPopover: View {
-    @Bindable var store: AppStore
-    @Binding var isPresented: Bool
-    @State private var showsClearConfirmation = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ForEach(store.recentProjects) { project in
-                MenuActionRow(
-                    title: project.name,
-                    trailingSymbol: "hammer",
-                    usesConcentricTopCorners: MenuLayout.isTopItem(
-                        project.id,
-                        firstID: store.recentProjects.first?.id
-                    )
-                ) {
-                    store.openProject(at: project.url)
-                    isPresented = false
-                }
-                .help(project.url.path)
-            }
-
-            Divider()
-                .padding(.vertical, MenuLayout.standardSeparatorSpacing)
-
-            MenuActionRow(
-                title: "Clear Recents…",
-                usesConcentricBottomCorners: true,
-                role: .destructive
-            ) {
-                showsClearConfirmation = true
-            }
-            .padding(.bottom, 6)
-        }
-        .padding(.top, 6)
-        .frame(width: 280)
-        .alert("Clear Recents?", isPresented: $showsClearConfirmation) {
-            Button("Clear", role: .destructive) {
-                store.clearRecents()
-                isPresented = false
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This removes all projects from the Recents menu.")
-        }
-    }
-}
-
 private struct PathSegmentLabel: View {
     let title: String
     let symbolName: String
@@ -741,7 +791,9 @@ private struct PathSegmentLabel: View {
 private struct MenuActionRow: View {
     let title: String
     var trailingSymbol: String?
+    var trailingSymbolRotation = 0.0
     var isEnabled = true
+    var isHighlighted = false
     var usesConcentricTopCorners = false
     var usesConcentricBottomCorners = false
     var role: ButtonRole?
@@ -756,6 +808,7 @@ private struct MenuActionRow: View {
                 if let trailingSymbol {
                     Image(systemName: trailingSymbol)
                         .font(.caption.weight(.semibold))
+                        .rotationEffect(.degrees(trailingSymbolRotation))
                 }
             }
             .padding(.horizontal, 10)
@@ -774,7 +827,7 @@ private struct MenuActionRow: View {
 
     @ViewBuilder
     private var rowBackground: some View {
-        let color = isHovered && isEnabled ? Color.accentColor : Color.clear
+        let color = isActive && isEnabled ? Color.accentColor : Color.clear
         if usesConcentricTopCorners || usesConcentricBottomCorners {
             ConcentricRectangle(
                 uniformTopCorners: usesConcentricTopCorners ? concentricCorner : .fixed(5),
@@ -793,7 +846,9 @@ private struct MenuActionRow: View {
 
     private var rowForeground: Color {
         guard isEnabled else { return .secondary }
-        if isHovered { return .white }
+        if isActive { return .white }
         return role == .destructive ? .red : .primary
     }
+
+    private var isActive: Bool { isHovered || isHighlighted }
 }

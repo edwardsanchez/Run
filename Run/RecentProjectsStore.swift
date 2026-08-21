@@ -1,5 +1,13 @@
 import Foundation
 
+enum RecentProjectsPolicy {
+    static let maximumCount = 5
+
+    static func limited(_ projects: [XcodeProject]) -> [XcodeProject] {
+        Array(projects.prefix(maximumCount))
+    }
+}
+
 protocol RecentProjectsPersisting: AnyObject {
     func load() -> [XcodeProject]
     func save(_ projects: [XcodeProject])
