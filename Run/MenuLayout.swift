@@ -83,6 +83,14 @@ struct RecentsAccordionState: Equatable {
         isExpanded = false
     }
 
+    mutating func moveHorizontally(by offset: Int, itemCount: Int) {
+        if offset > 0 {
+            expand(itemCount: itemCount)
+        } else if offset < 0 {
+            collapse()
+        }
+    }
+
     mutating func reconcile(itemCount: Int) {
         guard itemCount > 0 else {
             collapse()

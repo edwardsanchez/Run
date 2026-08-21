@@ -199,7 +199,7 @@ struct MenuBarPopoverView: View {
     @State private var showsClearRecentsConfirmation = false
     @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
     @State private var recentsContentHeight: CGFloat = 0
-    @FocusState private var isRecentsFocused: Bool
+    @FocusState private var isMenuFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -266,10 +266,15 @@ struct MenuBarPopoverView: View {
         .padding(.vertical, 7)
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
+        .focusable()
+        .focused($isMenuFocused)
+        .focusEffectDisabled()
+        .onKeyPress(keys: [.leftArrow, .rightArrow, .upArrow, .downArrow, .return]) { press in
+            handleMenuKeyPress(press.key)
+        }
         .onChange(of: store.recentProjects.count) { _, count in
             recentsState.reconcile(itemCount: count)
             if !recentsState.isExpanded {
-                isRecentsFocused = false
                 if case .recent = menuSelection.selectedID {
                     menuSelection.selectFromKeyboard(nil)
                 }
@@ -280,7 +285,6 @@ struct MenuBarPopoverView: View {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     recentsState.collapse()
                 }
-                isRecentsFocused = false
                 menuSelection.selectFromKeyboard(nil)
                 store.clearRecents()
             }
@@ -319,12 +323,6 @@ struct MenuBarPopoverView: View {
             }
             .padding(.leading, 14)
         }
-        .focusable()
-        .focused($isRecentsFocused)
-        .focusEffectDisabled()
-        .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
-            handleRecentsKeyPress(press.key)
-        }
     }
 
     private var maskedRecentsAccordion: some View {
@@ -351,57 +349,80 @@ struct MenuBarPopoverView: View {
     }
 
     private func toggleRecents() {
-        let wasExpanded = recentsState.isExpanded
         mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
         withAnimation(.easeInOut(duration: 0.18)) {
             recentsState.toggle(itemCount: store.recentProjects.count)
         }
-        if wasExpanded {
-            isRecentsFocused = false
-            menuSelection.selectFromMouse(.recents)
-        } else {
-            menuSelection.selectFromKeyboard(firstRecentSelectionID)
-            Task {
-                await Task.yield()
-                isRecentsFocused = true
-            }
+        menuSelection.selectFromKeyboard(.recents)
+        Task {
+            await Task.yield()
+            isMenuFocused = true
         }
     }
 
-    private func handleRecentsKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
+    private func handleMenuKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
         switch key {
+        case .leftArrow:
+            guard menuSelection.selectedID == .recents else { return .ignored }
+            setRecentsExpanded(false)
+        case .rightArrow:
+            guard menuSelection.selectedID == .recents else { return .ignored }
+            setRecentsExpanded(true)
         case .upArrow:
             moveMenuSelection(by: -1)
         case .downArrow:
             moveMenuSelection(by: 1)
         case .return:
-            if case .recent(let id) = menuSelection.selectedID,
-               let index = store.recentProjects.firstIndex(where: { $0.id == id }) {
-                chooseRecent(at: index)
-            } else if menuSelection.selectedID == .clearRecents {
-                showsClearRecentsConfirmation = true
-            } else if menuSelection.selectedID == .quit {
-                NSApplication.shared.terminate(nil)
-            }
+            guard activateMenuSelection() else { return .ignored }
         default:
             return .ignored
         }
         return .handled
     }
 
+    private func activateMenuSelection() -> Bool {
+        switch menuSelection.selectedID {
+        case .open:
+            store.chooseProject()
+        case .recents:
+            toggleRecents()
+        case .recent(let id):
+            guard let index = store.recentProjects.firstIndex(where: { $0.id == id }) else {
+                return false
+            }
+            chooseRecent(at: index)
+        case .clearRecents:
+            showsClearRecentsConfirmation = true
+        case .quit:
+            NSApplication.shared.terminate(nil)
+        case nil:
+            return false
+        }
+        return true
+    }
+
+    private func setRecentsExpanded(_ isExpanded: Bool) {
+        guard recentsState.isExpanded != isExpanded else { return }
+        mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            recentsState.moveHorizontally(
+                by: isExpanded ? 1 : -1,
+                itemCount: store.recentProjects.count
+            )
+        }
+        menuSelection.selectFromKeyboard(.recents)
+        isMenuFocused = true
+    }
+
     private var keyboardMenuOrder: [MainMenuSelectionID] {
-        [.open]
+        [.open, .recents]
             + store.recentProjects.map { .recent($0.id) }
             + [.clearRecents, .quit]
     }
 
-    private var firstRecentSelectionID: MainMenuSelectionID? {
-        store.recentProjects.first.map { .recent($0.id) }
-    }
-
     private func moveMenuSelection(by offset: Int) {
         mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
-        let fallback = offset > 0 ? firstRecentSelectionID : .open
+        let fallback: MainMenuSelectionID = offset > 0 ? .recents : .open
         menuSelection.moveFromKeyboard(
             by: offset,
             through: keyboardMenuOrder,
@@ -417,6 +438,7 @@ struct MenuBarPopoverView: View {
         let location = NSEvent.mouseLocation
         guard mouseMovementGate.registerMovement(to: location) else { return }
         menuSelection.selectFromMouse(id)
+        isMenuFocused = true
     }
 
     private func chooseRecent(at index: Int) {
@@ -425,7 +447,6 @@ struct MenuBarPopoverView: View {
         withAnimation(.easeInOut(duration: 0.18)) {
             recentsState.collapse()
         }
-        isRecentsFocused = false
         menuSelection.selectFromKeyboard(nil)
         store.openProject(at: project.url)
     }

@@ -86,6 +86,16 @@ struct MenuLayoutTests {
         #expect(state.chevronRotation == MenuLayout.recentsChevronCollapsedRotation)
     }
 
+    @Test func recentsAccordionOpensRightAndClosesLeft() {
+        var state = RecentsAccordionState()
+
+        state.moveHorizontally(by: 1, itemCount: 3)
+        #expect(state.isExpanded)
+
+        state.moveHorizontally(by: -1, itemCount: 3)
+        #expect(!state.isExpanded)
+    }
+
     @Test func keyboardNavigationOwnsTheOnlySelectionUntilTheMouseMoves() {
         var selection = MenuSelectionState<String>()
         selection.selectFromMouse("Recents")
@@ -106,17 +116,19 @@ struct MenuLayoutTests {
 
     @Test func arrowNavigationStealsSelectionAndMovesThroughOneOrderedMenu() {
         var selection = MenuSelectionState<String>()
-        let items = ["Open", "First Recent", "Second Recent", "Clear", "Quit"]
+        let items = ["Open", "Recents", "First Recent", "Second Recent", "Clear", "Quit"]
 
-        selection.selectFromMouse("Open")
-        selection.moveFromKeyboard(by: 1, through: items, fallbackID: "First Recent")
+        selection.selectFromKeyboard("Recents")
+        selection.moveFromKeyboard(by: 1, through: items, fallbackID: "Recents")
         #expect(selection.selectedID == "First Recent")
         #expect(selection.source == .keyboard)
 
-        selection.moveFromKeyboard(by: 1, through: items, fallbackID: "First Recent")
+        selection.moveFromKeyboard(by: 1, through: items, fallbackID: "Recents")
         #expect(selection.selectedID == "Second Recent")
-        selection.moveFromKeyboard(by: -1, through: items, fallbackID: "First Recent")
+        selection.moveFromKeyboard(by: -1, through: items, fallbackID: "Recents")
         #expect(selection.selectedID == "First Recent")
+        selection.moveFromKeyboard(by: -1, through: items, fallbackID: "Recents")
+        #expect(selection.selectedID == "Recents")
     }
 
     @Test func staticMouseDoesNotReclaimSelectionUntilItsPositionChanges() {
