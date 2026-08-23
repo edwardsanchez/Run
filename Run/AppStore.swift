@@ -275,6 +275,57 @@ final class AppStore {
         }
     }
 
+    func handleGlobalRunShortcut() {
+        let action = GlobalRunShortcutPolicy.action(
+            hasProject: project != nil,
+            hasScheme: selectedScheme != nil,
+            hasRunnableDestination: selectedDestination?.isRunnable == true
+        )
+        guard action == .restart else {
+            NSSound.beep()
+            return
+        }
+
+        restartRun()
+    }
+
+    private func restartRun() {
+        guard let project, let selectedScheme, let selectedDestination else { return }
+
+        let previousOperation = operation
+        previousOperation?.cancel()
+        client.cancelActiveCommand()
+        let previousLaunchContext = launchContext
+        launchContext = nil
+        setPhase(.building)
+        operation = Task {
+            do {
+                await previousOperation?.value
+                guard !Task.isCancelled else { return }
+                let context = try await RestartRunSequence.perform(
+                    previousContext: previousLaunchContext,
+                    stop: { try await client.stop($0) },
+                    launch: {
+                        try await client.buildAndLaunch(
+                            project: project,
+                            scheme: selectedScheme,
+                            destination: selectedDestination
+                        )
+                    }
+                )
+                guard !Task.isCancelled else {
+                    try? await client.stop(context)
+                    return
+                }
+                launchContext = context
+                setPhase(.running)
+            } catch {
+                guard !Task.isCancelled else { return }
+                setPhase(.failed(error.localizedDescription))
+            }
+        }
+    }
+
     func stop() {
         guard phase.isActive else { return }
         setPhase(.stopping)

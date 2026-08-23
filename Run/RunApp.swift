@@ -16,6 +16,7 @@ struct RunApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = AppStore()
     private var statusItemController: StatusItemController?
+    private var globalRunShortcut: GlobalRunShortcut?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let processIdentifier = ProcessInfo.processInfo.processIdentifier
@@ -33,6 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let controller = StatusItemController(store: store)
         statusItemController = controller
+        let shortcut = GlobalRunShortcut { [weak store] in
+            store?.handleGlobalRunShortcut()
+        }
+        shortcut.register()
+        globalRunShortcut = shortcut
 
         let arguments = ProcessInfo.processInfo.arguments
         if let projectFlag = arguments.firstIndex(of: "--open-project"),
