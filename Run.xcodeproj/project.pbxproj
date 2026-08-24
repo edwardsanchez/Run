@@ -131,7 +131,7 @@
 		6DABBAAA30362F5F00867D36 /* Debug configuration for PBXNativeTarget "Run" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = Run.icon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Run;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -164,7 +164,7 @@
 		6DABBAAB30362F5F00867D36 /* Release configuration for PBXNativeTarget "Run" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = Run.icon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Run;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
