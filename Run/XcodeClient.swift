@@ -42,6 +42,32 @@ final class XcodeClient {
         return schemes
     }
 
+    func schemeDescriptors(
+        for project: XcodeProject,
+        schemes: [String],
+        fileBackedDescriptors: [SchemeDescriptor]
+    ) async throws -> [SchemeDescriptor] {
+        let fileBackedByName = Dictionary(
+            uniqueKeysWithValues: fileBackedDescriptors.map { ($0.name, $0) }
+        )
+        var descriptors: [SchemeDescriptor] = []
+        for scheme in schemes {
+            try Task.checkCancellation()
+            if let descriptor = fileBackedByName[scheme] {
+                descriptors.append(descriptor)
+                continue
+            }
+
+            do {
+                descriptors.append(try await inferredSchemeDescriptor(for: scheme, in: project))
+            } catch {
+                try Task.checkCancellation()
+                descriptors.append(SchemeDescriptor(name: scheme, productName: nil, productKind: .other))
+            }
+        }
+        return descriptors
+    }
+
     func preferredDestination(
         in destinations: [RunDestination],
         savedDestinationID: String?
@@ -276,6 +302,19 @@ final class XcodeClient {
             .appendingPathComponent("usr/bin/xcodebuild")
             .path
         return try await command(executable: executable, arguments: arguments)
+    }
+
+    private func inferredSchemeDescriptor(
+        for scheme: String,
+        in project: XcodeProject
+    ) async throws -> SchemeDescriptor {
+        let result = try await xcodebuild(
+            containerArguments(for: project) + ["-scheme", scheme, "-showBuildSettings", "-json"]
+        )
+        return try XcodeOutputParser.schemeDescriptor(
+            name: scheme,
+            fromBuildSettings: result.standardOutput
+        )
     }
 
     private func developerCommand(

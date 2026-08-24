@@ -39,6 +39,23 @@ enum XcodeOutputParser {
         return schemes
     }
 
+    static func schemeDescriptor(name: String, fromBuildSettings data: Data) throws -> SchemeDescriptor {
+        let targets = try buildSettings(from: data)
+        let preferred = targets.first { target in
+            target.targetName == name || target.values["TARGET_NAME"] == name
+        } ?? targets.first { target in
+            guard let productName = target.values["FULL_PRODUCT_NAME"] else { return false }
+            return URL(fileURLWithPath: productName).deletingPathExtension().lastPathComponent == name
+        } ?? targets.first { $0.values["WRAPPER_EXTENSION"] == "app" }
+            ?? targets.first
+        let productName = preferred?.values["FULL_PRODUCT_NAME"]
+        return SchemeDescriptor(
+            name: name,
+            productName: productName,
+            productKind: productKind(for: productName)
+        )
+    }
+
     static func destinations(from output: String) -> [RunDestination] {
         output.split(separator: "\n").compactMap { line in
             guard let opening = line.firstIndex(of: "{"), let closing = line.lastIndex(of: "}") else {

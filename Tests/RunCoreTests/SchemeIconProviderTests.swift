@@ -3,6 +3,29 @@ import Testing
 @testable import RunCore
 
 struct SchemeIconProviderTests {
+    @Test func generatedAppSchemeLocatesItsIconComposerPackage() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let projectURL = root.appendingPathComponent("Setts.xcodeproj")
+        let iconURL = root.appendingPathComponent("Setts/Setts.icon")
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: iconURL, withIntermediateDirectories: true)
+        let buildSettings = Data(#"[{"target":"Setts","buildSettings":{"FULL_PRODUCT_NAME":"Setts.app","WRAPPER_EXTENSION":"app"}}]"#.utf8)
+
+        let project = try #require(XcodeProject(url: projectURL))
+        let descriptor = try XcodeOutputParser.schemeDescriptor(
+            name: "Setts",
+            fromBuildSettings: buildSettings
+        )
+
+        let source = try #require(SchemeIconLocator.source(for: descriptor, in: project))
+        guard case .iconPackage(let locatedURL) = source else {
+            Issue.record("Expected an Icon Composer package")
+            return
+        }
+        #expect(locatedURL.resolvingSymlinksInPath() == iconURL.resolvingSymlinksInPath())
+    }
+
     @Test func findsIconComposerPackageMatchingTheRunnableProduct() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

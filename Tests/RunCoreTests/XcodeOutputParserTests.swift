@@ -8,6 +8,30 @@ struct XcodeOutputParserTests {
         #expect(try XcodeOutputParser.schemes(from: data) == ["Second", "First"])
     }
 
+    @Test func infersGeneratedAppSchemeFromBuildSettings() throws {
+        let data = Data(#"[{"target":"Setts","buildSettings":{"TARGET_NAME":"Setts","FULL_PRODUCT_NAME":"Setts.app","WRAPPER_EXTENSION":"app"}}]"#.utf8)
+
+        let descriptor = try XcodeOutputParser.schemeDescriptor(
+            name: "Setts",
+            fromBuildSettings: data
+        )
+
+        #expect(descriptor == SchemeDescriptor(name: "Setts", productName: "Setts.app", productKind: .app))
+        #expect(descriptor.usesAppIconFallback)
+    }
+
+    @Test func generatedSchemePrefersItsMatchingTargetBuildSettings() throws {
+        let data = Data(#"[{"target":"SettsTests","buildSettings":{"FULL_PRODUCT_NAME":"SettsTests.xctest","WRAPPER_EXTENSION":"xctest"}},{"target":"Setts","buildSettings":{"FULL_PRODUCT_NAME":"Setts.app","WRAPPER_EXTENSION":"app"}}]"#.utf8)
+
+        let descriptor = try XcodeOutputParser.schemeDescriptor(
+            name: "Setts",
+            fromBuildSettings: data
+        )
+
+        #expect(descriptor.productName == "Setts.app")
+        #expect(descriptor.productKind == .app)
+    }
+
     @Test func parsesConcreteAndGenericDestinations() {
         let output = """
         Destinations compatible with the "Demo" scheme:

@@ -23,6 +23,7 @@ final class AppStore {
 
     @ObservationIgnored var onChange: (() -> Void)?
     private let client: XcodeClient
+    private let metadataClient: XcodeClient
     private let recentsStore: RecentProjectsPersisting
     private let selectionStore: SelectionStore
     private let schemeIconProvider: SchemeIconProvider
@@ -30,14 +31,17 @@ final class AppStore {
     private var schemeIconOperation: Task<Void, Never>?
     private var recentSchemeIconOperation: Task<Void, Never>?
     private var launchContext: LaunchContext?
+    private var schemeDescriptorsByProject: [String: [SchemeDescriptor]] = [:]
 
     init(
         client: XcodeClient,
+        metadataClient: XcodeClient,
         recentsStore: RecentProjectsPersisting,
         selectionStore: SelectionStore,
         schemeIconProvider: SchemeIconProvider
     ) {
         self.client = client
+        self.metadataClient = metadataClient
         self.recentsStore = recentsStore
         self.selectionStore = selectionStore
         self.schemeIconProvider = schemeIconProvider
@@ -55,6 +59,7 @@ final class AppStore {
     convenience init() {
         self.init(
             client: XcodeClient(),
+            metadataClient: XcodeClient(),
             recentsStore: UserDefaultsRecentProjectsStore(),
             selectionStore: SelectionStore(),
             schemeIconProvider: SchemeIconProvider()
@@ -157,13 +162,13 @@ final class AppStore {
                     local: localSchemes
                 )
                 schemes = discoveredSchemes
-                let localDescriptorsByName = Dictionary(
-                    uniqueKeysWithValues: localSchemeDescriptors.map { ($0.name, $0) }
+                schemeDescriptors = try await client.schemeDescriptors(
+                    for: project,
+                    schemes: discoveredSchemes,
+                    fileBackedDescriptors: localSchemeDescriptors
                 )
-                schemeDescriptors = discoveredSchemes.map { name in
-                    localDescriptorsByName[name]
-                        ?? SchemeDescriptor(name: name, productName: nil, productKind: .other)
-                }
+                guard !Task.isCancelled, self.project == project else { return }
+                schemeDescriptorsByProject[project.id] = schemeDescriptors
                 refreshSchemeIcons(for: project, descriptors: schemeDescriptors)
                 if let savedScheme, discoveredSchemes.contains(savedScheme) {
                     selectedScheme = savedScheme
@@ -213,6 +218,7 @@ final class AppStore {
         recentSchemeDescriptors = [:]
         recentSchemeIconImages = [:]
         recentSchemeIconOperation?.cancel()
+        metadataClient.cancelActiveCommand()
         recentsStore.save([])
         notifyChange()
     }
@@ -399,28 +405,46 @@ final class AppStore {
 
     private func refreshRecentSchemeIcons() {
         recentSchemeIconOperation?.cancel()
+        metadataClient.cancelActiveCommand()
         recentSchemeIconImages = [:]
-
-        let presentations = recentProjects.compactMap { project -> (XcodeProject, SchemeDescriptor)? in
-            let descriptors = XcodeOutputParser.localSchemeDescriptors(in: project)
-            let descriptor = RecentSchemePolicy.descriptor(
-                savedScheme: selectionStore.scheme(for: project),
-                availableDescriptors: descriptors
-            )
-            return descriptor.map { (project, $0) }
-        }
-        recentSchemeDescriptors = Dictionary(
-            uniqueKeysWithValues: presentations.map { ($0.0.id, $0.1) }
-        )
+        recentSchemeDescriptors = [:]
 
         recentSchemeIconOperation = Task { [weak self] in
             guard let self else { return }
-            for (project, descriptor) in presentations {
+            for project in recentProjects {
                 guard !Task.isCancelled,
                       recentProjects.contains(where: { $0.id == project.id }) else { return }
+
+                let fileBackedDescriptors = XcodeOutputParser.localSchemeDescriptors(in: project)
+                let descriptors: [SchemeDescriptor]
+                if let cached = schemeDescriptorsByProject[project.id] {
+                    descriptors = cached
+                } else if !fileBackedDescriptors.isEmpty {
+                    descriptors = fileBackedDescriptors
+                    schemeDescriptorsByProject[project.id] = descriptors
+                } else if let schemes = try? await metadataClient.schemes(for: project),
+                          let inferred = try? await metadataClient.schemeDescriptors(
+                            for: project,
+                            schemes: schemes,
+                            fileBackedDescriptors: []
+                          ) {
+                    descriptors = inferred
+                    schemeDescriptorsByProject[project.id] = descriptors
+                } else {
+                    descriptors = []
+                }
+
+                guard !Task.isCancelled,
+                      recentProjects.contains(where: { $0.id == project.id }),
+                      let descriptor = RecentSchemePolicy.descriptor(
+                        savedScheme: selectionStore.scheme(for: project),
+                        availableDescriptors: descriptors
+                      ) else { continue }
+                recentSchemeDescriptors[project.id] = descriptor
                 if let image = await schemeIconProvider.image(for: descriptor, in: project) {
                     recentSchemeIconImages[project.id] = image
                 }
+                notifyChange()
             }
         }
     }
