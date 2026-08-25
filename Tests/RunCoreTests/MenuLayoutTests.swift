@@ -52,6 +52,25 @@ struct MenuLayoutTests {
         #expect(MenuLayout.pickerHoverOpacity(isClickable: false, isHovered: false) == 0)
     }
 
+    @Test func pickerSegmentsShowProgressWhileLoadingAndRestoreTheirResolvedState() {
+        #expect(MenuLayout.pickerSegmentPresentation(
+            isLoading: true,
+            hasSelection: false
+        ) == .loading)
+        #expect(MenuLayout.pickerSegmentPresentation(
+            isLoading: true,
+            hasSelection: true
+        ) == .loading)
+        #expect(MenuLayout.pickerSegmentPresentation(
+            isLoading: false,
+            hasSelection: true
+        ) == .selected)
+        #expect(MenuLayout.pickerSegmentPresentation(
+            isLoading: false,
+            hasSelection: false
+        ) == .empty)
+    }
+
     @Test func pickerPresentationTransfersAndRestoresKeyboardFocus() {
         var focus = MenuKeyboardFocusState()
         #expect(focus.owner == .mainMenu)

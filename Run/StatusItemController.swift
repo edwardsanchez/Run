@@ -554,10 +554,11 @@ struct MenuBarPopoverView: View {
         if MenuLayout.shouldOpenPicker(itemCount: store.schemeDescriptors.count) {
             Button(action: toggleSchemePicker) {
                 PathSegmentLabel(
-                    title: store.selectedScheme ?? loadingSchemeTitle,
+                    title: schemeTitle,
                     iconImage: store.selectedSchemeDescriptor.flatMap(store.schemeIcon(for:)),
                     symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape",
                     usesAppIconFallback: store.selectedSchemeDescriptor?.usesAppIconFallback ?? false,
+                    presentation: schemePresentation,
                     showsMenuIndicator: true,
                     isHovered: isSchemePickerHovered,
                     isClickable: !store.phase.isActive
@@ -573,23 +574,24 @@ struct MenuBarPopoverView: View {
                 }
             }
             .accessibilityLabel("Scheme")
-            .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
+            .accessibilityValue(schemeTitle)
             .popover(isPresented: $showsSchemePicker, arrowEdge: .top) {
                 SchemePickerPopover(store: store, isPresented: $showsSchemePicker)
             }
         } else {
             PathSegmentLabel(
-                title: store.selectedScheme ?? loadingSchemeTitle,
+                title: schemeTitle,
                 iconImage: store.selectedSchemeDescriptor.flatMap(store.schemeIcon(for:)),
                 symbolName: store.selectedSchemeDescriptor?.symbolName ?? "gearshape",
                 usesAppIconFallback: store.selectedSchemeDescriptor?.usesAppIconFallback ?? false,
+                presentation: schemePresentation,
                 showsMenuIndicator: false,
                 isHovered: false,
                 isClickable: false
             )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Scheme")
-            .accessibilityValue(store.selectedScheme ?? loadingSchemeTitle)
+            .accessibilityValue(schemeTitle)
         }
     }
 
@@ -598,8 +600,9 @@ struct MenuBarPopoverView: View {
         if MenuLayout.shouldOpenPicker(itemCount: store.visibleDestinations.count) {
             Button(action: toggleDestinationPicker) {
                 PathSegmentLabel(
-                    title: store.selectedDestination?.name ?? loadingDestinationTitle,
+                    title: destinationTitle,
                     symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer",
+                    presentation: destinationPresentation,
                     showsMenuIndicator: true,
                     isHovered: isDestinationPickerHovered,
                     isClickable: !store.phase.isActive
@@ -615,30 +618,45 @@ struct MenuBarPopoverView: View {
                 }
             }
             .accessibilityLabel("Run Destination")
-            .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
+            .accessibilityValue(destinationTitle)
             .popover(isPresented: $showsDestinationPicker, arrowEdge: .top) {
                 RunDestinationPickerPopover(store: store, isPresented: $showsDestinationPicker)
             }
         } else {
             PathSegmentLabel(
-                title: store.selectedDestination?.name ?? loadingDestinationTitle,
+                title: destinationTitle,
                 symbolName: store.selectedDestination?.symbolName ?? "desktopcomputer",
+                presentation: destinationPresentation,
                 showsMenuIndicator: false,
                 isHovered: false,
                 isClickable: false
             )
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Run Destination")
-            .accessibilityValue(store.selectedDestination?.name ?? loadingDestinationTitle)
+            .accessibilityValue(destinationTitle)
         }
     }
 
-    private var loadingSchemeTitle: String {
-        store.isLoadingSchemes ? "Finding Schemes…" : "No Scheme"
+    private var schemePresentation: PickerSegmentPresentation {
+        MenuLayout.pickerSegmentPresentation(
+            isLoading: store.isLoadingSchemes,
+            hasSelection: store.selectedScheme != nil
+        )
     }
 
-    private var loadingDestinationTitle: String {
-        store.isLoadingDestinations ? "Finding Destinations…" : "No Destination"
+    private var destinationPresentation: PickerSegmentPresentation {
+        MenuLayout.pickerSegmentPresentation(
+            isLoading: store.isLoadingDestinations,
+            hasSelection: store.selectedDestination != nil
+        )
+    }
+
+    private var schemeTitle: String {
+        schemePresentation == .loading ? "Loading…" : store.selectedScheme ?? "No Scheme"
+    }
+
+    private var destinationTitle: String {
+        destinationPresentation == .loading ? "Loading…" : store.selectedDestination?.name ?? "No Destination"
     }
 }
 
@@ -1238,18 +1256,26 @@ private struct PathSegmentLabel: View {
     var iconImage: NSImage? = nil
     let symbolName: String
     var usesAppIconFallback = false
+    let presentation: PickerSegmentPresentation
     let showsMenuIndicator: Bool
     let isHovered: Bool
     let isClickable: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            PickerIconView(
-                image: iconImage,
-                symbolName: symbolName,
-                usesAppIconFallback: usesAppIconFallback,
-                color: .secondary
-            )
+            if presentation == .loading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 16, height: 16)
+                    .accessibilityHidden(true)
+            } else {
+                PickerIconView(
+                    image: iconImage,
+                    symbolName: symbolName,
+                    usesAppIconFallback: usesAppIconFallback,
+                    color: .secondary
+                )
+            }
             Text(title)
                 .lineLimit(1)
                 .truncationMode(.middle)

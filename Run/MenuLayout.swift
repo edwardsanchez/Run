@@ -46,6 +46,19 @@ enum MenuLayout {
         isClickable && isHovered ? 0.1 : 0
     }
 
+    static func pickerSegmentPresentation(
+        isLoading: Bool,
+        hasSelection: Bool
+    ) -> PickerSegmentPresentation {
+        if isLoading {
+            .loading
+        } else if hasSelection {
+            .selected
+        } else {
+            .empty
+        }
+    }
+
     static func projectOpenUsesConcentricTopCorners(showsDivider: Bool) -> Bool {
         !showsDivider
     }
@@ -210,4 +223,10 @@ enum RunControlPresentation: Equatable {
     case building
     case stopBuilding
     case stop
+}
+
+enum PickerSegmentPresentation: Equatable {
+    case loading
+    case selected
+    case empty
 }
