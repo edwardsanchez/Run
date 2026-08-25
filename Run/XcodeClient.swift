@@ -3,7 +3,7 @@ import Foundation
 
 @MainActor
 final class XcodeClient {
-    private var activeProcess: Process?
+    private var activeProcesses: [UUID: Process] = [:]
     private var launchedMacProcess: Process?
 
     func loadConfiguration(
@@ -50,22 +50,45 @@ final class XcodeClient {
         let fileBackedByName = Dictionary(
             uniqueKeysWithValues: fileBackedDescriptors.map { ($0.name, $0) }
         )
-        var descriptors: [SchemeDescriptor] = []
-        for scheme in schemes {
-            try Task.checkCancellation()
-            if let descriptor = fileBackedByName[scheme] {
-                descriptors.append(descriptor)
-                continue
+        return try await withThrowingTaskGroup(of: (Int, SchemeDescriptor).self) { group in
+            for (index, scheme) in schemes.enumerated() {
+                let fallback = fileBackedByName[scheme]
+                group.addTask { @MainActor [self] in
+                    try Task.checkCancellation()
+                    if let fallback,
+                       fallback.productKind != .app || fallback.appIconName != nil {
+                        return (index, fallback)
+                    }
+
+                    do {
+                        return (
+                            index,
+                            try await inferredSchemeDescriptor(
+                                for: scheme,
+                                in: project,
+                                fallback: fallback
+                            )
+                        )
+                    } catch {
+                        try Task.checkCancellation()
+                        return (
+                            index,
+                            fallback ?? SchemeDescriptor(
+                                name: scheme,
+                                productName: nil,
+                                productKind: .other
+                            )
+                        )
+                    }
+                }
             }
 
-            do {
-                descriptors.append(try await inferredSchemeDescriptor(for: scheme, in: project))
-            } catch {
-                try Task.checkCancellation()
-                descriptors.append(SchemeDescriptor(name: scheme, productName: nil, productKind: .other))
+            var descriptors = Array<SchemeDescriptor?>(repeating: nil, count: schemes.count)
+            for try await (index, descriptor) in group {
+                descriptors[index] = descriptor
             }
+            return descriptors.compactMap { $0 }
         }
-        return descriptors
     }
 
     func preferredDestination(
@@ -230,8 +253,9 @@ final class XcodeClient {
     }
 
     func cancelActiveCommand() {
-        activeProcess?.terminate()
-        activeProcess = nil
+        let processes = activeProcesses.values
+        activeProcesses.removeAll()
+        processes.forEach { $0.terminate() }
     }
 
     private func containerArguments(for project: XcodeProject) -> [String] {
@@ -306,13 +330,15 @@ final class XcodeClient {
 
     private func inferredSchemeDescriptor(
         for scheme: String,
-        in project: XcodeProject
+        in project: XcodeProject,
+        fallback: SchemeDescriptor?
     ) async throws -> SchemeDescriptor {
         let result = try await xcodebuild(
             containerArguments(for: project) + ["-scheme", scheme, "-showBuildSettings", "-json"]
         )
         return try XcodeOutputParser.schemeDescriptor(
             name: scheme,
+            fallback: fallback,
             fromBuildSettings: result.standardOutput
         )
     }
@@ -440,12 +466,13 @@ final class XcodeClient {
         process.standardError = errorHandle
         process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
         process.currentDirectoryURL = currentDirectory
-        activeProcess = process
+        let commandID = UUID()
+        activeProcesses[commandID] = process
 
         do {
             try process.run()
         } catch {
-            activeProcess = nil
+            activeProcesses[commandID] = nil
             throw RunError.commandFailed(error.localizedDescription)
         }
 
@@ -454,7 +481,7 @@ final class XcodeClient {
                 continuation.resume(returning: process.terminationStatus)
             }
         }
-        activeProcess = nil
+        activeProcesses[commandID] = nil
         try? outputHandle.synchronize()
         try? errorHandle.synchronize()
         let standardOutput = (try? Data(contentsOf: outputURL)) ?? Data()

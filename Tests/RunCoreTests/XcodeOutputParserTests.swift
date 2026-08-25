@@ -32,6 +32,36 @@ struct XcodeOutputParserTests {
         #expect(descriptor.productKind == .app)
     }
 
+    @Test func enrichesFileBackedSchemesWithTheirConfiguredAppIconNames() throws {
+        let mappings = [
+            ("MonogramDev", "MonogramDev.app", "AppIconDev"),
+            ("MonogramPrivateBeta", "Monogram.app", "AppIconAlpha"),
+            ("MonogramRelease", "Monogram.app", "AppIcon"),
+            ("MonogramTestFlight", "Monogram.app", "AppIconInternal"),
+        ]
+
+        for (scheme, product, appIconName) in mappings {
+            let fallback = SchemeDescriptor(name: scheme, productName: product, productKind: .app)
+            let data = Data("""
+            [{"target":"Target","buildSettings":{
+              "FULL_PRODUCT_NAME":"\(product)",
+              "WRAPPER_EXTENSION":"app",
+              "ASSETCATALOG_COMPILER_APPICON_NAME":"\(appIconName)"
+            }}]
+            """.utf8)
+
+            let descriptor = try XcodeOutputParser.schemeDescriptor(
+                name: scheme,
+                fallback: fallback,
+                fromBuildSettings: data
+            )
+
+            #expect(descriptor.productName == product)
+            #expect(descriptor.productKind == .app)
+            #expect(descriptor.appIconName == appIconName)
+        }
+    }
+
     @Test func parsesConcreteAndGenericDestinations() {
         let output = """
         Destinations compatible with the "Demo" scheme:

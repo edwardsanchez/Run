@@ -58,6 +58,9 @@ enum SchemeIconLocator {
         if let productName = descriptor.productName {
             names.insert(URL(fileURLWithPath: productName).deletingPathExtension().lastPathComponent, at: 0)
         }
+        if let appIconName = descriptor.appIconName {
+            names.insert(URL(fileURLWithPath: appIconName).deletingPathExtension().lastPathComponent, at: 0)
+        }
         return names.map(normalizedName)
     }
 
@@ -138,13 +141,13 @@ final class SchemeIconProvider {
 
     private struct Key: Hashable {
         let projectID: String
-        let schemeName: String
+        let descriptor: SchemeDescriptor
     }
 
     private var cache: [Key: CachedIcon] = [:]
 
     func image(for descriptor: SchemeDescriptor, in project: XcodeProject) async -> NSImage? {
-        let key = Key(projectID: project.id, schemeName: descriptor.name)
+        let key = Key(projectID: project.id, descriptor: descriptor)
         if let cached = cache[key] {
             switch cached {
             case .image(let image): return image

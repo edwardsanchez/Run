@@ -1,8 +1,81 @@
+import AppKit
 import Foundation
 import Testing
 @testable import RunCore
 
 struct SchemeIconProviderTests {
+    @Test @MainActor func enrichedMetadataDoesNotReuseAnUnavailableCacheEntry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let projectURL = root.appendingPathComponent("Monogram.xcodeproj")
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        for name in ["AppIconDev", "AppIconRelease"] {
+            let iconSet = root.appendingPathComponent("Assets.xcassets/\(name).appiconset")
+            try FileManager.default.createDirectory(at: iconSet, withIntermediateDirectories: true)
+            let contents = """
+            {"images":[{"filename":"Icon.png","size":"32x32","scale":"1x"}]}
+            """
+            try Data(contents.utf8).write(to: iconSet.appendingPathComponent("Contents.json"))
+            let imageData = try #require(Data(base64Encoded:
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLJAAAAAElFTkSuQmCC"
+            ))
+            try imageData.write(to: iconSet.appendingPathComponent("Icon.png"))
+        }
+
+        let project = try #require(XcodeProject(url: projectURL))
+        let provider = SchemeIconProvider()
+        let unresolved = SchemeDescriptor(
+            name: "MonogramDev",
+            productName: "MonogramDev.app",
+            productKind: .app
+        )
+        #expect(await provider.image(for: unresolved, in: project) == nil)
+
+        let enriched = SchemeDescriptor(
+            name: "MonogramDev",
+            productName: "MonogramDev.app",
+            productKind: .app,
+            appIconName: "AppIconDev"
+        )
+        #expect(await provider.image(for: enriched, in: project) != nil)
+    }
+
+    @Test func configuredAppIconNamesSelectTheCorrectVariantPackage() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let projectURL = root.appendingPathComponent("Monogram.xcodeproj")
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let mappings = [
+            ("MonogramDev", "MonogramDev.app", "AppIconDev"),
+            ("MonogramPrivateBeta", "Monogram.app", "AppIconAlpha"),
+            ("MonogramRelease", "Monogram.app", "AppIcon"),
+            ("MonogramTestFlight", "Monogram.app", "AppIconInternal"),
+        ]
+        for appIconName in mappings.map(\.2) {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent("Resources/\(appIconName).icon"),
+                withIntermediateDirectories: true
+            )
+        }
+        let project = try #require(XcodeProject(url: projectURL))
+
+        for (scheme, product, appIconName) in mappings {
+            let descriptor = SchemeDescriptor(
+                name: scheme,
+                productName: product,
+                productKind: .app,
+                appIconName: appIconName
+            )
+            let source = try #require(SchemeIconLocator.source(for: descriptor, in: project))
+            guard case .iconPackage(let locatedURL) = source else {
+                Issue.record("Expected \(appIconName).icon for \(scheme)")
+                continue
+            }
+            let expectedURL = root.appendingPathComponent("Resources/\(appIconName).icon")
+            #expect(locatedURL.resolvingSymlinksInPath() == expectedURL.resolvingSymlinksInPath())
+        }
+    }
+
     @Test func generatedAppSchemeLocatesItsIconComposerPackage() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

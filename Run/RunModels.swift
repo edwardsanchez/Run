@@ -130,6 +130,19 @@ struct SchemeDescriptor: Equatable, Hashable, Identifiable, Sendable {
     let name: String
     let productName: String?
     let productKind: SchemeProductKind
+    let appIconName: String?
+
+    init(
+        name: String,
+        productName: String?,
+        productKind: SchemeProductKind,
+        appIconName: String? = nil
+    ) {
+        self.name = name
+        self.productName = productName
+        self.productKind = productKind
+        self.appIconName = appIconName
+    }
 
     var id: String { name }
     var symbolName: String { productKind.symbolName }

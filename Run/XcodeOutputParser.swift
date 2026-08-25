@@ -39,20 +39,31 @@ enum XcodeOutputParser {
         return schemes
     }
 
-    static func schemeDescriptor(name: String, fromBuildSettings data: Data) throws -> SchemeDescriptor {
+    static func schemeDescriptor(
+        name: String,
+        fallback: SchemeDescriptor? = nil,
+        fromBuildSettings data: Data
+    ) throws -> SchemeDescriptor {
         let targets = try buildSettings(from: data)
         let preferred = targets.first { target in
             target.targetName == name || target.values["TARGET_NAME"] == name
+        } ?? targets.first { target in
+            guard let fallbackProductName = fallback?.productName else { return false }
+            return target.values["FULL_PRODUCT_NAME"] == fallbackProductName
         } ?? targets.first { target in
             guard let productName = target.values["FULL_PRODUCT_NAME"] else { return false }
             return URL(fileURLWithPath: productName).deletingPathExtension().lastPathComponent == name
         } ?? targets.first { $0.values["WRAPPER_EXTENSION"] == "app" }
             ?? targets.first
-        let productName = preferred?.values["FULL_PRODUCT_NAME"]
+        let productName = preferred?.values["FULL_PRODUCT_NAME"] ?? fallback?.productName
+        let appIconName = preferred?.values["ASSETCATALOG_COMPILER_APPICON_NAME"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? fallback?.appIconName
         return SchemeDescriptor(
             name: name,
             productName: productName,
-            productKind: productKind(for: productName)
+            productKind: productKind(for: productName),
+            appIconName: appIconName
         )
     }
 

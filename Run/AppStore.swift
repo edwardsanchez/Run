@@ -417,10 +417,16 @@ final class AppStore {
 
                 let fileBackedDescriptors = XcodeOutputParser.localSchemeDescriptors(in: project)
                 let descriptors: [SchemeDescriptor]
-                if let cached = schemeDescriptorsByProject[project.id] {
+                if self.project == project, isLoadingSchemes {
+                    descriptors = fileBackedDescriptors
+                } else if let cached = schemeDescriptorsByProject[project.id] {
                     descriptors = cached
                 } else if !fileBackedDescriptors.isEmpty {
-                    descriptors = fileBackedDescriptors
+                    descriptors = (try? await metadataClient.schemeDescriptors(
+                        for: project,
+                        schemes: fileBackedDescriptors.map(\.name),
+                        fileBackedDescriptors: fileBackedDescriptors
+                    )) ?? fileBackedDescriptors
                     schemeDescriptorsByProject[project.id] = descriptors
                 } else if let schemes = try? await metadataClient.schemes(for: project),
                           let inferred = try? await metadataClient.schemeDescriptors(
@@ -432,6 +438,11 @@ final class AppStore {
                     schemeDescriptorsByProject[project.id] = descriptors
                 } else {
                     descriptors = []
+                }
+
+                if self.project == project, !isLoadingSchemes, schemeDescriptors != descriptors {
+                    schemeDescriptors = descriptors
+                    refreshSchemeIcons(for: project, descriptors: descriptors)
                 }
 
                 guard !Task.isCancelled,
