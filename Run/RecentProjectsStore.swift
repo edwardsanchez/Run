@@ -11,9 +11,28 @@ enum RecentProjectsPolicy {
         for project: XcodeProject,
         among projects: [XcodeProject]
     ) -> String? {
-        let matchingNameCount = projects.lazy.filter { $0.name == project.name }.count
-        guard matchingNameCount > 1 else { return nil }
-        return project.url.deletingLastPathComponent().path
+        let matchingProjects = projects.filter { $0.name == project.name }
+        guard matchingProjects.count > 1 else { return nil }
+
+        let directoryURL = project.url.deletingLastPathComponent().standardizedFileURL
+        let directoryComponents = directoryURL.pathComponents
+        let matchingDirectoryComponents = matchingProjects.map {
+            $0.url.deletingLastPathComponent().standardizedFileURL.pathComponents
+        }
+        let sharedComponentCount = matchingDirectoryComponents.reduce(
+            directoryComponents.count
+        ) { currentCount, components in
+            min(
+                currentCount,
+                zip(directoryComponents, components).prefix { $0 == $1 }.count
+            )
+        }
+
+        guard sharedComponentCount > 1,
+              sharedComponentCount < directoryComponents.count else {
+            return directoryURL.path
+        }
+        return "…/" + directoryComponents.dropFirst(sharedComponentCount).joined(separator: "/")
     }
 }
 

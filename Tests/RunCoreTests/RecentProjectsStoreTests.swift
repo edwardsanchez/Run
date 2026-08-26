@@ -61,22 +61,40 @@ struct RecentProjectsStoreTests {
             url: URL(fileURLWithPath: "/Users/example/Worktrees/feature/Demo.xcodeproj")
         ))
         let otherProject = try #require(XcodeProject(
-            url: URL(fileURLWithPath: "/Users/example/Sources/Other.xcodeproj")
+            url: URL(fileURLWithPath: "/Volumes/Builds/Other.xcodeproj")
         ))
         let projects = [mainProject, worktreeProject, otherProject]
 
         #expect(RecentProjectsPolicy.disambiguatingPath(
             for: mainProject,
             among: projects
-        ) == "/Users/example/Sources/Demo")
+        ) == "…/Sources/Demo")
         #expect(RecentProjectsPolicy.disambiguatingPath(
             for: worktreeProject,
             among: projects
-        ) == "/Users/example/Worktrees/feature")
+        ) == "…/Worktrees/feature")
         #expect(RecentProjectsPolicy.disambiguatingPath(
             for: otherProject,
             among: projects
         ) == nil)
+    }
+
+    @Test func duplicateProjectPathsRemainAbsoluteWithoutAMeaningfulSharedPrefix() throws {
+        let localProject = try #require(XcodeProject(
+            url: URL(fileURLWithPath: "/Users/example/Sources/Demo.xcodeproj")
+        ))
+        let externalProject = try #require(XcodeProject(
+            url: URL(fileURLWithPath: "/Volumes/Worktrees/Demo.xcodeproj")
+        ))
+
+        #expect(RecentProjectsPolicy.disambiguatingPath(
+            for: localProject,
+            among: [localProject, externalProject]
+        ) == "/Users/example/Sources")
+        #expect(RecentProjectsPolicy.disambiguatingPath(
+            for: externalProject,
+            among: [localProject, externalProject]
+        ) == "/Volumes/Worktrees")
     }
 
     @Test func selectedSchemeAndDestinationRoundTrip() throws {
