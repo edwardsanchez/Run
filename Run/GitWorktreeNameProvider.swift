@@ -23,10 +23,17 @@ actor GitWorktreeNameProvider: WorktreeNameProviding {
         let commonGitDirectory = normalizedFileURL(for: paths[1])
         guard gitDirectory != commonGitDirectory else { return nil }
 
-        return gitOutput(
+        if let branchName = gitOutput(
             arguments: ["symbolic-ref", "--quiet", "--short", "HEAD"],
             currentDirectory: projectDirectory
-        )
+        ) {
+            return branchName
+        }
+        guard let revision = gitOutput(
+            arguments: ["rev-parse", "--short=7", "HEAD"],
+            currentDirectory: projectDirectory
+        ) else { return nil }
+        return revision + " (detached)"
     }
 
     private func gitOutput(arguments: [String], currentDirectory: URL) -> String? {

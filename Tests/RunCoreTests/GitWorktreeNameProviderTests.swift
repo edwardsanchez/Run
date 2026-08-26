@@ -3,7 +3,7 @@ import Testing
 @testable import RunCore
 
 struct GitWorktreeNameProviderTests {
-    @Test func returnsBranchNameOnlyForAttachedLinkedWorktrees() async throws {
+    @Test func returnsBranchOrDetachedRevisionOnlyForLinkedWorktrees() async throws {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "RunGitWorktreeTests-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -20,6 +20,7 @@ struct GitWorktreeNameProviderTests {
         try runGit(["-C", main.path, "branch", "feature/worktree-label"])
         try runGit(["-C", main.path, "worktree", "add", attached.path, "feature/worktree-label"])
         try runGit(["-C", main.path, "worktree", "add", "--detach", detached.path, "HEAD"])
+        let detachedRevision = try runGit(["-C", detached.path, "rev-parse", "--short=7", "HEAD"])
 
         let mainProject = try project(in: main)
         let attachedProject = try project(in: attached)
@@ -32,7 +33,7 @@ struct GitWorktreeNameProviderTests {
 
         #expect(mainName == nil)
         #expect(attachedName == "feature/worktree-label")
-        #expect(detachedName == nil)
+        #expect(detachedName == detachedRevision + " (detached)")
     }
 
     private func project(in directory: URL) throws -> XcodeProject {
@@ -41,19 +42,24 @@ struct GitWorktreeNameProviderTests {
         return try #require(XcodeProject(url: projectURL))
     }
 
-    private func runGit(_ arguments: [String]) throws {
+    @discardableResult
+    private func runGit(_ arguments: [String]) throws -> String {
         let process = Process()
+        let output = Pipe()
         let error = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
+        process.standardOutput = output
         process.standardError = error
         try process.run()
+        let outputData = output.fileHandleForReading.readDataToEndOfFile()
         let errorData = error.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             throw GitFixtureError.commandFailed(String(decoding: errorData, as: UTF8.self))
         }
+        return String(decoding: outputData, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
