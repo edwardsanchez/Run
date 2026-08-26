@@ -20,6 +20,7 @@ final class AppStore {
     private(set) var schemeIconImages: [String: NSImage] = [:]
     private(set) var recentSchemeDescriptors: [String: SchemeDescriptor] = [:]
     private(set) var recentSchemeIconImages: [String: NSImage] = [:]
+    private(set) var recentProjectWorktreeNames: [String: String] = [:]
 
     @ObservationIgnored var onChange: (() -> Void)?
     private let client: XcodeClient
@@ -27,9 +28,11 @@ final class AppStore {
     private let recentsStore: RecentProjectsPersisting
     private let selectionStore: SelectionStore
     private let schemeIconProvider: SchemeIconProvider
+    private let worktreeNameProvider: any WorktreeNameProviding
     private var operation: Task<Void, Never>?
     private var schemeIconOperation: Task<Void, Never>?
     private var recentSchemeIconOperation: Task<Void, Never>?
+    private var recentWorktreeNameOperation: Task<Void, Never>?
     private var launchContext: LaunchContext?
     private var schemeDescriptorsByProject: [String: [SchemeDescriptor]] = [:]
 
@@ -38,13 +41,15 @@ final class AppStore {
         metadataClient: XcodeClient,
         recentsStore: RecentProjectsPersisting,
         selectionStore: SelectionStore,
-        schemeIconProvider: SchemeIconProvider
+        schemeIconProvider: SchemeIconProvider,
+        worktreeNameProvider: any WorktreeNameProviding
     ) {
         self.client = client
         self.metadataClient = metadataClient
         self.recentsStore = recentsStore
         self.selectionStore = selectionStore
         self.schemeIconProvider = schemeIconProvider
+        self.worktreeNameProvider = worktreeNameProvider
         let loadedProjects = recentsStore.load()
         let existingProjects = loadedProjects.filter {
             FileManager.default.fileExists(atPath: $0.url.path)
@@ -54,6 +59,7 @@ final class AppStore {
             recentsStore.save(recentProjects)
         }
         refreshRecentSchemeIcons()
+        refreshRecentWorktreeNames()
     }
 
     convenience init() {
@@ -62,7 +68,8 @@ final class AppStore {
             metadataClient: XcodeClient(),
             recentsStore: UserDefaultsRecentProjectsStore(),
             selectionStore: SelectionStore(),
-            schemeIconProvider: SchemeIconProvider()
+            schemeIconProvider: SchemeIconProvider(),
+            worktreeNameProvider: GitWorktreeNameProvider()
         )
     }
 
@@ -85,6 +92,14 @@ final class AppStore {
 
     func recentSchemeIcon(for project: XcodeProject) -> NSImage? {
         recentSchemeIconImages[project.id]
+    }
+
+    func recentProjectSubtitle(for project: XcodeProject) -> String? {
+        RecentProjectsPolicy.disambiguatingLabel(
+            for: project,
+            among: recentProjects,
+            worktreeName: recentProjectWorktreeNames[project.id]
+        )
     }
 
     var destinationGroups: [RunDestinationGroup] {
@@ -217,7 +232,9 @@ final class AppStore {
         recentProjects = []
         recentSchemeDescriptors = [:]
         recentSchemeIconImages = [:]
+        recentProjectWorktreeNames = [:]
         recentSchemeIconOperation?.cancel()
+        recentWorktreeNameOperation?.cancel()
         metadataClient.cancelActiveCommand()
         recentsStore.save([])
         notifyChange()
@@ -383,6 +400,7 @@ final class AppStore {
         recentProjects = RecentProjectsPolicy.limited(recentProjects)
         recentsStore.save(recentProjects)
         refreshRecentSchemeIcons()
+        refreshRecentWorktreeNames()
         notifyChange()
     }
 
@@ -455,6 +473,32 @@ final class AppStore {
                 if let image = await schemeIconProvider.image(for: descriptor, in: project) {
                     recentSchemeIconImages[project.id] = image
                 }
+                notifyChange()
+            }
+        }
+    }
+
+    private func refreshRecentWorktreeNames() {
+        recentWorktreeNameOperation?.cancel()
+        recentProjectWorktreeNames = [:]
+        let duplicateNames = Set(
+            Dictionary(grouping: recentProjects, by: \.name)
+                .filter { $0.value.count > 1 }
+                .keys
+        )
+        let duplicateProjects = recentProjects.filter { duplicateNames.contains($0.name) }
+
+        recentWorktreeNameOperation = Task { [weak self] in
+            guard let self else { return }
+            for project in duplicateProjects {
+                guard !Task.isCancelled,
+                      recentProjects.contains(where: { $0.id == project.id }) else { return }
+                guard let name = await worktreeNameProvider.worktreeName(for: project) else {
+                    continue
+                }
+                guard !Task.isCancelled,
+                      recentProjects.contains(where: { $0.id == project.id }) else { return }
+                recentProjectWorktreeNames[project.id] = name
                 notifyChange()
             }
         }

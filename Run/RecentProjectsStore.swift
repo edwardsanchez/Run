@@ -7,12 +7,14 @@ enum RecentProjectsPolicy {
         Array(projects.prefix(maximumCount))
     }
 
-    static func disambiguatingPath(
+    static func disambiguatingLabel(
         for project: XcodeProject,
-        among projects: [XcodeProject]
+        among projects: [XcodeProject],
+        worktreeName: String? = nil
     ) -> String? {
         let matchingProjects = projects.filter { $0.name == project.name }
         guard matchingProjects.count > 1 else { return nil }
+        if let worktreeName { return worktreeName }
 
         let directoryURL = project.url.deletingLastPathComponent().standardizedFileURL
         let directoryComponents = directoryURL.pathComponents

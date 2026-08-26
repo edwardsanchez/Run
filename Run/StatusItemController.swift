@@ -338,10 +338,7 @@ struct MenuBarPopoverView: View {
                 let descriptor = store.recentSchemeDescriptor(for: project)
                 MenuActionRow(
                     title: project.name,
-                    subtitle: RecentProjectsPolicy.disambiguatingPath(
-                        for: project,
-                        among: store.recentProjects
-                    ),
+                    subtitle: store.recentProjectSubtitle(for: project),
                     leadingIconImage: store.recentSchemeIcon(for: project),
                     leadingSymbolName: descriptor?.symbolName ?? "app",
                     usesAppIconFallback: descriptor?.usesAppIconFallback ?? true,

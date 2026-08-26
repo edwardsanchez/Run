@@ -65,15 +65,15 @@ struct RecentProjectsStoreTests {
         ))
         let projects = [mainProject, worktreeProject, otherProject]
 
-        #expect(RecentProjectsPolicy.disambiguatingPath(
+        #expect(RecentProjectsPolicy.disambiguatingLabel(
             for: mainProject,
             among: projects
         ) == "…/Sources/Demo")
-        #expect(RecentProjectsPolicy.disambiguatingPath(
+        #expect(RecentProjectsPolicy.disambiguatingLabel(
             for: worktreeProject,
             among: projects
         ) == "…/Worktrees/feature")
-        #expect(RecentProjectsPolicy.disambiguatingPath(
+        #expect(RecentProjectsPolicy.disambiguatingLabel(
             for: otherProject,
             among: projects
         ) == nil)
@@ -87,14 +87,34 @@ struct RecentProjectsStoreTests {
             url: URL(fileURLWithPath: "/Volumes/Worktrees/Demo.xcodeproj")
         ))
 
-        #expect(RecentProjectsPolicy.disambiguatingPath(
+        #expect(RecentProjectsPolicy.disambiguatingLabel(
             for: localProject,
             among: [localProject, externalProject]
         ) == "/Users/example/Sources")
-        #expect(RecentProjectsPolicy.disambiguatingPath(
+        #expect(RecentProjectsPolicy.disambiguatingLabel(
             for: externalProject,
             among: [localProject, externalProject]
         ) == "/Volumes/Worktrees")
+    }
+
+    @Test func attachedWorktreeNameTakesPriorityOnlyForDuplicateProjects() throws {
+        let mainProject = try #require(XcodeProject(
+            url: URL(fileURLWithPath: "/Users/example/Sources/Demo.xcodeproj")
+        ))
+        let worktreeProject = try #require(XcodeProject(
+            url: URL(fileURLWithPath: "/Users/example/Worktrees/Demo.xcodeproj")
+        ))
+
+        #expect(RecentProjectsPolicy.disambiguatingLabel(
+            for: worktreeProject,
+            among: [mainProject, worktreeProject],
+            worktreeName: "codex/settings-icons"
+        ) == "codex/settings-icons")
+        #expect(RecentProjectsPolicy.disambiguatingLabel(
+            for: worktreeProject,
+            among: [worktreeProject],
+            worktreeName: "codex/settings-icons"
+        ) == nil)
     }
 
     @Test func selectedSchemeAndDestinationRoundTrip() throws {
