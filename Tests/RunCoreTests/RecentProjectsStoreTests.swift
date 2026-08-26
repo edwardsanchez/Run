@@ -53,6 +53,32 @@ struct RecentProjectsStoreTests {
         #expect(limited == Array(projects.prefix(5)))
     }
 
+    @Test func duplicateProjectNamesAreDisambiguatedByTheirContainingPaths() throws {
+        let mainProject = try #require(XcodeProject(
+            url: URL(fileURLWithPath: "/Users/example/Sources/Demo/Demo.xcodeproj")
+        ))
+        let worktreeProject = try #require(XcodeProject(
+            url: URL(fileURLWithPath: "/Users/example/Worktrees/feature/Demo.xcodeproj")
+        ))
+        let otherProject = try #require(XcodeProject(
+            url: URL(fileURLWithPath: "/Users/example/Sources/Other.xcodeproj")
+        ))
+        let projects = [mainProject, worktreeProject, otherProject]
+
+        #expect(RecentProjectsPolicy.disambiguatingPath(
+            for: mainProject,
+            among: projects
+        ) == "/Users/example/Sources/Demo")
+        #expect(RecentProjectsPolicy.disambiguatingPath(
+            for: worktreeProject,
+            among: projects
+        ) == "/Users/example/Worktrees/feature")
+        #expect(RecentProjectsPolicy.disambiguatingPath(
+            for: otherProject,
+            among: projects
+        ) == nil)
+    }
+
     @Test func selectedSchemeAndDestinationRoundTrip() throws {
         let suite = "RunSelections.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

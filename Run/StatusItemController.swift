@@ -338,6 +338,10 @@ struct MenuBarPopoverView: View {
                 let descriptor = store.recentSchemeDescriptor(for: project)
                 MenuActionRow(
                     title: project.name,
+                    subtitle: RecentProjectsPolicy.disambiguatingPath(
+                        for: project,
+                        among: store.recentProjects
+                    ),
                     leadingIconImage: store.recentSchemeIcon(for: project),
                     leadingSymbolName: descriptor?.symbolName ?? "app",
                     usesAppIconFallback: descriptor?.usesAppIconFallback ?? true,
@@ -1333,6 +1337,7 @@ private struct PickerIconView: View {
 
 private struct MenuActionRow: View {
     let title: String
+    var subtitle: String?
     var leadingIconImage: NSImage? = nil
     var leadingSymbolName: String? = nil
     var usesAppIconFallback = false
@@ -1359,10 +1364,18 @@ private struct MenuActionRow: View {
                         color: isFocusedSelection ? .white : .blue
                     )
 
-                    Text(title)
+                    MenuActionRowText(
+                        title: title,
+                        subtitle: subtitle,
+                        isFocusedSelection: isFocusedSelection
+                    )
                         .padding(.leading, 6)
                 } else {
-                    Text(title)
+                    MenuActionRowText(
+                        title: title,
+                        subtitle: subtitle,
+                        isFocusedSelection: isFocusedSelection
+                    )
                 }
                 Spacer()
                 if let trailingSymbol {
@@ -1373,7 +1386,8 @@ private struct MenuActionRow: View {
             }
             .padding(.leading, 10 + contentLeadingIndent)
             .padding(.trailing, 10)
-            .frame(height: MenuLayout.menuItemHeight)
+            .frame(minHeight: MenuLayout.menuItemHeight)
+            .padding(.vertical, subtitle == nil ? 0 : 5)
             .contentShape(.rect)
             .foregroundStyle(rowForeground)
             .background {
@@ -1427,5 +1441,28 @@ private struct MenuActionRow: View {
         return isSelectionFocused
             ? .accentColor
             : .primary.opacity(MenuLayout.unfocusedSelectionOpacity)
+    }
+}
+
+private struct MenuActionRowText: View {
+    let title: String
+    let subtitle: String?
+    let isFocusedSelection: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .lineLimit(1)
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(
+                        isFocusedSelection ? .white.opacity(0.6) : .secondary
+                    )
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
     }
 }

@@ -6,6 +6,15 @@ enum RecentProjectsPolicy {
     static func limited(_ projects: [XcodeProject]) -> [XcodeProject] {
         Array(projects.prefix(maximumCount))
     }
+
+    static func disambiguatingPath(
+        for project: XcodeProject,
+        among projects: [XcodeProject]
+    ) -> String? {
+        let matchingNameCount = projects.lazy.filter { $0.name == project.name }.count
+        guard matchingNameCount > 1 else { return nil }
+        return project.url.deletingLastPathComponent().path
+    }
 }
 
 protocol RecentProjectsPersisting: AnyObject {
