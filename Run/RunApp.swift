@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var globalRunShortcut: GlobalRunShortcut?
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let project = ExternalProjectOpenRequest.project(in: urls) else { return }
+        store.openProject(at: project.url)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let processIdentifier = ProcessInfo.processInfo.processIdentifier
         let runningApplications = Bundle.main.bundleIdentifier.map {

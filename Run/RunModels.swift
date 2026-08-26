@@ -30,6 +30,12 @@ struct XcodeProject: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+enum ExternalProjectOpenRequest {
+    static func project(in urls: [URL]) -> XcodeProject? {
+        urls.lazy.compactMap(XcodeProject.init(url:)).first
+    }
+}
+
 struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
     let platform: String
     let name: String
