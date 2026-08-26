@@ -200,6 +200,19 @@ private struct RecentsContentHeightPreferenceKey: PreferenceKey {
     }
 }
 
+private struct RecentProjectGroupContentHeightsPreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+
+    static func reduce(
+        value: inout [String: CGFloat],
+        nextValue: () -> [String: CGFloat]
+    ) {
+        value.merge(nextValue()) { current, next in
+            max(current, next)
+        }
+    }
+}
+
 struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
     @State private var showsSchemePicker = false
@@ -210,6 +223,7 @@ struct MenuBarPopoverView: View {
     @State private var showsClearRecentsConfirmation = false
     @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
     @State private var recentsContentHeight: CGFloat = 0
+    @State private var recentProjectGroupContentHeights: [String: CGFloat] = [:]
     @State private var isSchemePickerHovered = false
     @State private var isDestinationPickerHovered = false
     @State private var keyboardFocus = MenuKeyboardFocusState()
@@ -366,14 +380,7 @@ struct MenuBarPopoverView: View {
                         toggleRecentGroup(group)
                     }
 
-                    if recentProjectGroupsState.isExpanded(group.id) {
-                        ForEach(group.projects) { project in
-                            recentProjectRow(
-                                project,
-                                contentLeadingIndent: MenuLayout.duplicateRecentContentLeadingIndent
-                            )
-                        }
-                    }
+                    maskedRecentProjectGroup(group)
                 } else if let project = group.projects.first {
                     recentProjectRow(
                         project,
@@ -397,6 +404,38 @@ struct MenuBarPopoverView: View {
                 showsClearRecentsConfirmation = true
             }
         }
+        .onPreferenceChange(RecentProjectGroupContentHeightsPreferenceKey.self) { heights in
+            recentProjectGroupContentHeights.merge(heights) { _, measured in measured }
+        }
+    }
+
+    private func maskedRecentProjectGroup(_ group: RecentProjectGroup) -> some View {
+        VStack(spacing: 0) {
+            ForEach(group.projects) { project in
+                recentProjectRow(
+                    project,
+                    contentLeadingIndent: MenuLayout.duplicateRecentContentLeadingIndent
+                )
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: RecentProjectGroupContentHeightsPreferenceKey.self,
+                    value: [group.id: proxy.size.height]
+                )
+            }
+        }
+        .frame(
+            height: recentProjectGroupsState.isExpanded(group.id)
+                ? recentProjectGroupContentHeights[group.id, default: 0]
+                : 0,
+            alignment: .top
+        )
+        .clipped()
+        .allowsHitTesting(recentProjectGroupsState.isExpanded(group.id))
+        .accessibilityHidden(!recentProjectGroupsState.isExpanded(group.id))
     }
 
     private func recentProjectRow(
@@ -603,8 +642,14 @@ struct MenuBarPopoverView: View {
 
     private func toggleRecentGroup(_ group: RecentProjectGroup) {
         mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
+        let isExpanding = !recentProjectGroupsState.isExpanded(group.id)
+        let contentHeight = recentProjectGroupContentHeights[group.id, default: 0]
         withAnimation(.easeInOut(duration: 0.18)) {
             recentProjectGroupsState.toggle(group.id)
+            recentsContentHeight = max(
+                0,
+                recentsContentHeight + (isExpanding ? contentHeight : -contentHeight)
+            )
         }
         menuSelection.selectFromKeyboard(.recentGroup(group.id))
         isMenuFocused = true
