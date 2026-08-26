@@ -12,6 +12,7 @@ enum MenuLayout {
     static let destinationPickerMaximumListHeight = 500.0
     static let minimumConcentricCornerRadius = menuItemHeight / 2
     static let nestedMenuItemContentLeadingIndent = 14.0
+    static let duplicateRecentContentLeadingIndent = nestedMenuItemContentLeadingIndent * 2
     static let recentProjectTrailingSymbol: String? = nil
     static let filterMinimumItemCount = 6
     static let unfocusedSelectionOpacity = 0.1
@@ -158,6 +159,30 @@ struct RecentsAccordionState: Equatable {
         isExpanded
             ? MenuLayout.recentsChevronExpandedRotation
             : MenuLayout.recentsChevronCollapsedRotation
+    }
+}
+
+struct RecentProjectGroupsState: Equatable {
+    private(set) var expandedIDs: Set<String> = []
+
+    func isExpanded(_ id: String) -> Bool {
+        expandedIDs.contains(id)
+    }
+
+    mutating func toggle(_ id: String) {
+        setExpanded(!isExpanded(id), for: id)
+    }
+
+    mutating func setExpanded(_ isExpanded: Bool, for id: String) {
+        if isExpanded {
+            expandedIDs.insert(id)
+        } else {
+            expandedIDs.remove(id)
+        }
+    }
+
+    mutating func reconcile(validIDs: Set<String>) {
+        expandedIDs.formIntersection(validIDs)
     }
 }
 

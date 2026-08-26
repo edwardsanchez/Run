@@ -214,4 +214,20 @@ struct MenuLayoutTests {
         state.reconcileDefaultExpansion(itemCount: 0, projectIsOpen: false)
         #expect(!state.isExpanded)
     }
+
+    @Test func duplicateProjectAccordionsToggleIndependentlyAndDropMissingGroups() {
+        var state = RecentProjectGroupsState()
+
+        state.toggle("Monogram")
+        #expect(state.isExpanded("Monogram"))
+        #expect(!state.isExpanded("Run"))
+
+        state.setExpanded(true, for: "Run")
+        state.toggle("Monogram")
+        #expect(!state.isExpanded("Monogram"))
+        #expect(state.isExpanded("Run"))
+
+        state.reconcile(validIDs: ["Monogram"])
+        #expect(!state.isExpanded("Run"))
+    }
 }

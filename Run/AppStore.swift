@@ -94,6 +94,13 @@ final class AppStore {
         recentSchemeIconImages[project.id]
     }
 
+    func recentGroupIconProject(in group: RecentProjectGroup) -> XcodeProject? {
+        RecentProjectsPolicy.iconProject(
+            in: group,
+            availableIconProjectIDs: Set(recentSchemeIconImages.keys)
+        )
+    }
+
     func recentProjectSubtitle(for project: XcodeProject) -> String? {
         RecentProjectsPolicy.disambiguatingLabel(
             for: project,
@@ -237,6 +244,21 @@ final class AppStore {
         recentWorktreeNameOperation?.cancel()
         metadataClient.cancelActiveCommand()
         recentsStore.save([])
+        notifyChange()
+    }
+
+    func removeRecent(_ project: XcodeProject) {
+        recentProjects = RecentProjectsPolicy.removing(
+            projectID: project.id,
+            from: recentProjects
+        )
+        recentSchemeDescriptors[project.id] = nil
+        recentSchemeIconImages[project.id] = nil
+        recentProjectWorktreeNames[project.id] = nil
+        schemeDescriptorsByProject[project.id] = nil
+        recentsStore.save(recentProjects)
+        refreshRecentSchemeIcons()
+        refreshRecentWorktreeNames()
         notifyChange()
     }
 

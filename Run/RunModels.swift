@@ -19,7 +19,7 @@ struct XcodeProject: Codable, Equatable, Identifiable, Sendable {
     var id: String { url.standardizedFileURL.path }
     var name: String { url.deletingPathExtension().lastPathComponent }
 
-    init?(url: URL) {
+    nonisolated init?(url: URL) {
         let resolvedURL = url.standardizedFileURL
         switch resolvedURL.pathExtension.lowercased() {
         case "xcodeproj": kind = .project

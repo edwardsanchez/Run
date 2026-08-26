@@ -177,9 +177,19 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 private enum MainMenuSelectionID: Equatable {
     case open
     case recents
+    case recentGroup(String)
     case recent(String)
     case clearRecents
     case quit
+
+    var isInsideRecents: Bool {
+        switch self {
+        case .recentGroup, .recent, .clearRecents:
+            true
+        default:
+            false
+        }
+    }
 }
 
 private struct RecentsContentHeightPreferenceKey: PreferenceKey {
@@ -195,6 +205,7 @@ struct MenuBarPopoverView: View {
     @State private var showsSchemePicker = false
     @State private var showsDestinationPicker = false
     @State private var recentsState = RecentsAccordionState()
+    @State private var recentProjectGroupsState = RecentProjectGroupsState()
     @State private var menuSelection = MenuSelectionState<MainMenuSelectionID>()
     @State private var showsClearRecentsConfirmation = false
     @State private var mouseMovementGate = MouseMovementGate<CGPoint>()
@@ -295,8 +306,9 @@ struct MenuBarPopoverView: View {
         }
         .onChange(of: store.recentProjects.count) { _, count in
             recentsState.reconcile(itemCount: count)
+            reconcileExpandedRecentGroups()
             if !recentsState.isExpanded {
-                if case .recent = menuSelection.selectedID {
+                if menuSelection.selectedID?.isInsideRecents == true {
                     menuSelection.selectFromKeyboard(nil)
                 }
             }
@@ -308,7 +320,8 @@ struct MenuBarPopoverView: View {
                     projectIsOpen: project != nil
                 )
             }
-            if !recentsState.isExpanded, case .recent = menuSelection.selectedID {
+            if !recentsState.isExpanded,
+               menuSelection.selectedID?.isInsideRecents == true {
                 menuSelection.selectFromKeyboard(nil)
             }
         }
@@ -334,23 +347,39 @@ struct MenuBarPopoverView: View {
 
     private var recentsAccordion: some View {
         VStack(spacing: 0) {
-            ForEach(Array(store.recentProjects.enumerated()), id: \.element.id) { index, project in
-                let descriptor = store.recentSchemeDescriptor(for: project)
-                MenuActionRow(
-                    title: project.name,
-                    subtitle: store.recentProjectSubtitle(for: project),
-                    leadingIconImage: store.recentSchemeIcon(for: project),
-                    leadingSymbolName: descriptor?.symbolName ?? "app",
-                    usesAppIconFallback: descriptor?.usesAppIconFallback ?? true,
-                    trailingSymbol: MenuLayout.recentProjectTrailingSymbol,
-                    contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
-                    isHighlighted: menuSelection.selectedID == .recent(project.id),
-                    isSelectionFocused: keyboardFocus.isMainMenuFocused,
-                    onMouseActivity: { trackMouse($0, over: .recent(project.id)) }
-                ) {
-                    chooseRecent(at: index)
+            ForEach(recentGroups) { group in
+                if group.isDuplicate,
+                   let iconProject = store.recentGroupIconProject(in: group) {
+                    let descriptor = store.recentSchemeDescriptor(for: iconProject)
+                    MenuActionRow(
+                        title: group.name,
+                        leadingIconImage: store.recentSchemeIcon(for: iconProject),
+                        leadingSymbolName: descriptor?.symbolName ?? "app",
+                        usesAppIconFallback: descriptor?.usesAppIconFallback ?? true,
+                        trailingSymbol: "chevron.right",
+                        trailingSymbolRotation: recentGroupChevronRotation(for: group),
+                        contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent,
+                        isHighlighted: menuSelection.selectedID == .recentGroup(group.id),
+                        isSelectionFocused: keyboardFocus.isMainMenuFocused,
+                        onMouseActivity: { trackMouse($0, over: .recentGroup(group.id)) }
+                    ) {
+                        toggleRecentGroup(group)
+                    }
+
+                    if recentProjectGroupsState.isExpanded(group.id) {
+                        ForEach(group.projects) { project in
+                            recentProjectRow(
+                                project,
+                                contentLeadingIndent: MenuLayout.duplicateRecentContentLeadingIndent
+                            )
+                        }
+                    }
+                } else if let project = group.projects.first {
+                    recentProjectRow(
+                        project,
+                        contentLeadingIndent: MenuLayout.nestedMenuItemContentLeadingIndent
+                    )
                 }
-                .help(project.url.path)
             }
 
             Divider()
@@ -368,6 +397,26 @@ struct MenuBarPopoverView: View {
                 showsClearRecentsConfirmation = true
             }
         }
+    }
+
+    private func recentProjectRow(
+        _ project: XcodeProject,
+        contentLeadingIndent: Double
+    ) -> some View {
+        let descriptor = store.recentSchemeDescriptor(for: project)
+        return RecentProjectMenuRow(
+            project: project,
+            subtitle: store.recentProjectSubtitle(for: project),
+            iconImage: store.recentSchemeIcon(for: project),
+            symbolName: descriptor?.symbolName ?? "app",
+            usesAppIconFallback: descriptor?.usesAppIconFallback ?? true,
+            contentLeadingIndent: contentLeadingIndent,
+            isHighlighted: menuSelection.selectedID == .recent(project.id),
+            isSelectionFocused: keyboardFocus.isMainMenuFocused,
+            onMouseActivity: { trackMouse($0, over: .recent(project.id)) },
+            open: { chooseRecent(project) },
+            remove: { removeRecent(project) }
+        )
     }
 
     private var maskedRecentsAccordion: some View {
@@ -408,11 +457,9 @@ struct MenuBarPopoverView: View {
     private func handleMenuKeyPress(_ key: KeyEquivalent) -> KeyPress.Result {
         switch key {
         case .leftArrow:
-            guard menuSelection.selectedID == .recents else { return .ignored }
-            setRecentsExpanded(false)
+            guard moveSelectedAccordionHorizontally(by: -1) else { return .ignored }
         case .rightArrow:
-            guard menuSelection.selectedID == .recents else { return .ignored }
-            setRecentsExpanded(true)
+            guard moveSelectedAccordionHorizontally(by: 1) else { return .ignored }
         case .upArrow:
             moveMenuSelection(by: -1)
         case .downArrow:
@@ -431,11 +478,16 @@ struct MenuBarPopoverView: View {
             store.chooseProject()
         case .recents:
             toggleRecents()
-        case .recent(let id):
-            guard let index = store.recentProjects.firstIndex(where: { $0.id == id }) else {
+        case .recentGroup(let id):
+            guard let group = recentGroups.first(where: { $0.id == id }) else {
                 return false
             }
-            chooseRecent(at: index)
+            toggleRecentGroup(group)
+        case .recent(let id):
+            guard let project = store.recentProjects.first(where: { $0.id == id }) else {
+                return false
+            }
+            chooseRecent(project)
         case .clearRecents:
             showsClearRecentsConfirmation = true
         case .quit:
@@ -460,9 +512,22 @@ struct MenuBarPopoverView: View {
     }
 
     private var keyboardMenuOrder: [MainMenuSelectionID] {
-        [.open, .recents]
-            + store.recentProjects.map { .recent($0.id) }
-            + [.clearRecents, .quit]
+        var order: [MainMenuSelectionID] = [.open, .recents]
+        if recentsState.isExpanded {
+            for group in recentGroups {
+                if group.isDuplicate {
+                    order.append(.recentGroup(group.id))
+                    if recentProjectGroupsState.isExpanded(group.id) {
+                        order.append(contentsOf: group.projects.map { .recent($0.id) })
+                    }
+                } else if let project = group.projects.first {
+                    order.append(.recent(project.id))
+                }
+            }
+            order.append(.clearRecents)
+        }
+        order.append(.quit)
+        return order
     }
 
     private func moveMenuSelection(by offset: Int) {
@@ -524,14 +589,67 @@ struct MenuBarPopoverView: View {
         }
     }
 
-    private func chooseRecent(at index: Int) {
-        guard store.recentProjects.indices.contains(index) else { return }
-        let project = store.recentProjects[index]
+    private func chooseRecent(_ project: XcodeProject) {
         withAnimation(.easeInOut(duration: 0.18)) {
             recentsState.collapse()
         }
         menuSelection.selectFromKeyboard(nil)
         store.openProject(at: project.url)
+    }
+
+    private var recentGroups: [RecentProjectGroup] {
+        RecentProjectsPolicy.grouped(store.recentProjects)
+    }
+
+    private func toggleRecentGroup(_ group: RecentProjectGroup) {
+        mouseMovementGate.recordCurrentPosition(NSEvent.mouseLocation)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            recentProjectGroupsState.toggle(group.id)
+        }
+        menuSelection.selectFromKeyboard(.recentGroup(group.id))
+        isMenuFocused = true
+    }
+
+    private func moveSelectedAccordionHorizontally(by offset: Int) -> Bool {
+        switch menuSelection.selectedID {
+        case .recents:
+            setRecentsExpanded(offset > 0)
+        case .recentGroup(let id):
+            guard let group = recentGroups.first(where: { $0.id == id }) else {
+                return false
+            }
+            let shouldExpand = offset > 0
+            guard recentProjectGroupsState.isExpanded(id) != shouldExpand else { return true }
+            toggleRecentGroup(group)
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func recentGroupChevronRotation(for group: RecentProjectGroup) -> Double {
+        recentProjectGroupsState.isExpanded(group.id)
+            ? MenuLayout.recentsChevronExpandedRotation
+            : MenuLayout.recentsChevronCollapsedRotation
+    }
+
+    private func reconcileExpandedRecentGroups() {
+        let duplicateGroupIDs = Set(recentGroups.filter(\.isDuplicate).map(\.id))
+        recentProjectGroupsState.reconcile(validIDs: duplicateGroupIDs)
+        if let selectedID = menuSelection.selectedID,
+           !keyboardMenuOrder.contains(selectedID) {
+            menuSelection.selectFromKeyboard(nil)
+        }
+    }
+
+    private func removeRecent(_ project: XcodeProject) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            store.removeRecent(project)
+            reconcileExpandedRecentGroups()
+        }
+        if menuSelection.selectedID == .recent(project.id) {
+            menuSelection.selectFromKeyboard(nil)
+        }
     }
 
     private var configurationMenus: some View {
@@ -1332,6 +1450,42 @@ private struct PickerIconView: View {
     }
 }
 
+private struct RecentProjectMenuRow: View {
+    let project: XcodeProject
+    let subtitle: String?
+    let iconImage: NSImage?
+    let symbolName: String
+    let usesAppIconFallback: Bool
+    let contentLeadingIndent: Double
+    let isHighlighted: Bool
+    let isSelectionFocused: Bool
+    let onMouseActivity: (Bool) -> Void
+    let open: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        MenuActionRow(
+            title: project.name,
+            subtitle: subtitle,
+            leadingIconImage: iconImage,
+            leadingSymbolName: symbolName,
+            usesAppIconFallback: usesAppIconFallback,
+            trailingSymbol: MenuLayout.recentProjectTrailingSymbol,
+            contentLeadingIndent: contentLeadingIndent,
+            isHighlighted: isHighlighted,
+            isSelectionFocused: isSelectionFocused,
+            onMouseActivity: onMouseActivity,
+            action: open
+        )
+        .help(project.url.path)
+        .contextMenu {
+            Button("Remove from Recents", role: .destructive) {
+                remove()
+            }
+        }
+    }
+}
+
 private struct MenuActionRow: View {
     let title: String
     var subtitle: String?
@@ -1352,7 +1506,7 @@ private struct MenuActionRow: View {
 
     var body: some View {
         Button(role: role, action: action) {
-            HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
                 if leadingIconImage != nil || leadingSymbolName != nil {
                     PickerIconView(
                         image: leadingIconImage,

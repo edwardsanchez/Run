@@ -1,10 +1,40 @@
 import Foundation
 
 enum RecentProjectsPolicy {
-    static let maximumCount = 5
+    static let maximumCount = 10
 
     static func limited(_ projects: [XcodeProject]) -> [XcodeProject] {
         Array(projects.prefix(maximumCount))
+    }
+
+    static func grouped(_ projects: [XcodeProject]) -> [RecentProjectGroup] {
+        var projectsByName: [String: [XcodeProject]] = [:]
+        var orderedNames: [String] = []
+
+        for project in projects {
+            if projectsByName[project.name] == nil {
+                orderedNames.append(project.name)
+            }
+            projectsByName[project.name, default: []].append(project)
+        }
+
+        return orderedNames.compactMap { name in
+            projectsByName[name].map {
+                RecentProjectGroup(name: name, projects: $0)
+            }
+        }
+    }
+
+    static func removing(projectID: XcodeProject.ID, from projects: [XcodeProject]) -> [XcodeProject] {
+        projects.filter { $0.id != projectID }
+    }
+
+    static func iconProject(
+        in group: RecentProjectGroup,
+        availableIconProjectIDs: Set<XcodeProject.ID>
+    ) -> XcodeProject? {
+        group.projects.first { availableIconProjectIDs.contains($0.id) }
+            ?? group.projects.first
     }
 
     static func disambiguatingLabel(
@@ -36,6 +66,14 @@ enum RecentProjectsPolicy {
         }
         return "…/" + directoryComponents.dropFirst(sharedComponentCount).joined(separator: "/")
     }
+}
+
+struct RecentProjectGroup: Equatable, Identifiable, Sendable {
+    let name: String
+    let projects: [XcodeProject]
+
+    var id: String { name }
+    var isDuplicate: Bool { projects.count > 1 }
 }
 
 protocol RecentProjectsPersisting: AnyObject {
