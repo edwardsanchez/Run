@@ -1,11 +1,14 @@
 import AppKit
 import Foundation
 import Observation
+import OSLog
 import UniformTypeIdentifiers
 
 @MainActor
 @Observable
 final class AppStore {
+    private static let logger = Logger(subsystem: "app.amorfati.Run", category: "AppStore")
+
     private(set) var project: XcodeProject?
     private(set) var schemes: [String] = []
     private(set) var schemeDescriptors: [SchemeDescriptor] = []
@@ -141,6 +144,32 @@ final class AppStore {
         panel.allowedContentTypes = [.xcodeProject, .xcodeWorkspace]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         openProject(at: url)
+    }
+
+    func openCurrentProjectInXcode() {
+        CurrentProjectOpenAction.perform(for: project) { projectURL in
+            guard let xcodeURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: "com.apple.dt.Xcode"
+            ) else {
+                Self.logger.error("Xcode could not be found.")
+                NSSound.beep()
+                return
+            }
+
+            let configuration = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.open(
+                [projectURL],
+                withApplicationAt: xcodeURL,
+                configuration: configuration
+            ) { _, error in
+                guard let error else { return }
+                let description = error.localizedDescription
+                Task { @MainActor in
+                    Self.logger.error("Could not open project in Xcode: \(description, privacy: .public)")
+                    NSSound.beep()
+                }
+            }
+        }
     }
 
     func openProject(at url: URL) {
@@ -525,6 +554,12 @@ final class AppStore {
             }
         }
     }
+
+    #if DEBUG
+    func showBuildFailureForVerification() {
+        setPhase(.failed("The build failed."))
+    }
+    #endif
 
     private func persistSelection() {
         guard let project else { return }

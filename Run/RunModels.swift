@@ -36,6 +36,13 @@ enum ExternalProjectOpenRequest {
     }
 }
 
+enum CurrentProjectOpenAction {
+    static func perform(for project: XcodeProject?, open: (URL) -> Void) {
+        guard let project else { return }
+        open(project.url)
+    }
+}
+
 struct RunDestination: Codable, Equatable, Hashable, Identifiable, Sendable {
     let platform: String
     let name: String

@@ -99,6 +99,16 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         case .stop:
             label = "Stop"
             setRunItemImage(symbolName: "stop.fill", accessibilityDescription: label)
+        case .failed:
+            label = "Build Failed"
+            setRunItemImage(
+                symbolName: "xmark.octagon.fill",
+                accessibilityDescription: label,
+                tintColor: .systemRed
+            )
+        case .retry:
+            label = "Try Again"
+            setRunItemImage(symbolName: "arrow.counterclockwise", accessibilityDescription: label)
         }
         runItem.button?.toolTip = label
         runItem.button?.setAccessibilityLabel(label)
@@ -107,12 +117,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         renderedRunPhase = store.phase
     }
 
-    private func setRunItemImage(symbolName: String, accessibilityDescription: String) {
+    private func setRunItemImage(
+        symbolName: String,
+        accessibilityDescription: String,
+        tintColor: NSColor? = nil
+    ) {
         buildProgressIndicator.stopAnimation(nil)
         runItem.button?.image = NSImage(
             systemSymbolName: symbolName,
             accessibilityDescription: accessibilityDescription
         )
+        runItem.button?.contentTintColor = tintColor
     }
 
     private func configureBuildProgressIndicator() {
@@ -157,7 +172,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func toggleRun() {
-        store.toggleRun()
+        switch MenuLayout.runControlAction(for: store.phase) {
+        case .run:
+            store.run()
+        case .stop:
+            store.stop()
+        }
     }
 
     @objc private func mouseEntered(with event: NSEvent) {
@@ -213,6 +233,31 @@ private struct RecentProjectGroupContentHeightsPreferenceKey: PreferenceKey {
     }
 }
 
+private struct ProjectHeader: View {
+    let name: String
+    let openInXcode: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(name)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button(action: openInXcode) {
+                Image(systemName: "arrow.up.forward.app")
+                    .accessibilityHidden(true)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Open in Xcode")
+            .accessibilityLabel("Open \(name) in Xcode")
+        }
+    }
+}
+
 struct MenuBarPopoverView: View {
     @Bindable var store: AppStore
     @State private var showsSchemePicker = false
@@ -232,10 +277,9 @@ struct MenuBarPopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let project = store.project {
-                Text(project.name)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                ProjectHeader(name: project.name) {
+                    store.openCurrentProjectInXcode()
+                }
                     .padding(.horizontal, 14)
                     .padding(.top, 13)
                     .padding(.bottom, 9)

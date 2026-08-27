@@ -122,6 +122,28 @@ struct MenuLayoutTests {
         ) == .run)
     }
 
+    @Test func failedRunControlRevealsRetryAndRunsAgainWhenPressed() {
+        let failedPhase = RunPhase.failed("Build output stays private")
+
+        #expect(MenuLayout.runControlPresentation(
+            phase: failedPhase,
+            isHovered: false,
+            canRevealBuildStop: false
+        ) == .failed)
+        #expect(MenuLayout.runControlPresentation(
+            phase: failedPhase,
+            isHovered: true,
+            canRevealBuildStop: false
+        ) == .retry)
+        #expect(MenuLayout.runControlAction(for: failedPhase) == .run)
+    }
+
+    @Test func activeRunControlStillStopsWhenPressed() {
+        #expect(MenuLayout.runControlAction(for: .building) == .stop)
+        #expect(MenuLayout.runControlAction(for: .running) == .stop)
+        #expect(MenuLayout.runControlAction(for: .stopping) == .stop)
+    }
+
     @Test func recentsAccordionExpandsAndReversesOnSecondToggle() {
         var state = RecentsAccordionState()
 

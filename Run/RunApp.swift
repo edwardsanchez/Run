@@ -63,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 controller.showVerificationWindow()
             }
         }
+        if arguments.contains("--verification-build-failure") {
+            store.showBuildFailureForVerification()
+        }
         #endif
     }
 }

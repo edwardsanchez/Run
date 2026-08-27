@@ -82,9 +82,15 @@ enum MenuLayout {
             isHovered && canRevealBuildStop ? .stopBuilding : .building
         case .running, .stopping:
             .stop
+        case .failed:
+            isHovered ? .retry : .failed
         default:
             .run
         }
+    }
+
+    static func runControlAction(for phase: RunPhase) -> RunControlAction {
+        phase.isActive ? .stop : .run
     }
 }
 
@@ -247,6 +253,13 @@ enum RunControlPresentation: Equatable {
     case run
     case building
     case stopBuilding
+    case stop
+    case failed
+    case retry
+}
+
+enum RunControlAction: Equatable {
+    case run
     case stop
 }
 
